@@ -148,14 +148,42 @@ db.enable_load_extension(True)
 PY
 }
 
+# Debian and Ubuntu ship python3 with ensurepip split into a separate package, so
+# `python3 -m venv` fails on a stock system with an error about ensurepip. An interpreter
+# that cannot build a venv is no use to this tier, so it is a selection criterion, not a
+# surprise several steps later.
+py_can_venv() { # PYTHON
+  "$1" -c "import ensurepip" >/dev/null 2>&1
+}
+
+# Set when no interpreter qualifies, so the message can name the actual problem instead of
+# saying "none found" for two very different causes.
+PY_PROBLEM=""
+
 pick_python() { # -> interpreter on stdout, empty if none qualify
-  local c
+  local c saw_ext=""
   for c in "$(brew --prefix 2>/dev/null)/bin/python3" python3.13 python3.12 python3.11 python3; do
     [ -n "$c" ] || continue
     have "$c" || continue
-    if py_loads_extensions "$c"; then command -v "$c"; return 0; fi
+    py_loads_extensions "$c" || continue
+    saw_ext=1
+    if py_can_venv "$c"; then command -v "$c"; return 0; fi
+    PY_VENV_CANDIDATE="$(command -v "$c")"
   done
+  if [ -n "$saw_ext" ]; then PY_PROBLEM=venv; else PY_PROBLEM=extensions; fi
   return 0
+}
+
+# The exact command for this machine, not a generic "install the venv package".
+venv_fix_hint() { # PYTHON
+  local v
+  v="$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 3)"
+  if have apt-get;   then printf 'sudo apt install -y python%s-venv\n' "$v"
+  elif have dnf;     then printf 'sudo dnf install -y python3\n'
+  elif have pacman;  then printf 'sudo pacman -S --needed python\n'
+  elif have brew;    then printf 'brew install python@%s\n' "$v"
+  else                    printf 'install the venv/ensurepip module for %s\n' "$1"
+  fi
 }
 
 want() { # TIER_VAR PROMPT DEFAULT
@@ -279,15 +307,33 @@ phase_semantic() {
     return 0
   fi
 
-  local py
+  local py fix
+  PY_VENV_CANDIDATE=""
   py="$(pick_python)"
   if [ -z "$py" ]; then
-    warn "no python3 on this machine can load sqlite extensions, which sqlite-vec needs"
-    info "fix:  brew install python@3.13   then re-run with --semantic"
+    if [ "$PY_PROBLEM" = venv ]; then
+      fix="$(venv_fix_hint "${PY_VENV_CANDIDATE:-python3}")"
+      warn "python3 is here but cannot create a virtualenv (ensurepip is missing)"
+      info "Debian and Ubuntu split that into its own package. Fix with:"
+      info "  $fix"
+      if [ -z "$DRY_RUN" ] && have sudo && confirm "run that now?" n; then
+        if sh -c "$fix"; then
+          py="$(pick_python)"
+        else
+          warn "that failed — run it yourself, then: ./install.sh --semantic"
+        fi
+      fi
+    else
+      warn "no python3 here can load sqlite extensions, which sqlite-vec needs"
+      info "fix:  brew install python@3.13   (or any python3 built with extension support)"
+    fi
+  fi
+  if [ -z "$py" ]; then
+    info "the vault, launcher and hooks are unaffected; re-run with --semantic when fixed"
     SKIPPED_TIERS="$SKIPPED_TIERS semantic"
     return 0
   fi
-  ok "interpreter: $py (loads sqlite extensions)"
+  ok "interpreter: $py (loads sqlite extensions, can build a venv)"
 
   if [ -n "$DRY_RUN" ]; then
     dim "python3 -m venv $(rel "$VAULT")/.venv; pip install mcp sqlite-vec"
@@ -297,15 +343,29 @@ phase_semantic() {
   fi
 
   if [ ! -x "$VAULT/.venv/bin/python" ]; then
-    "$py" -m venv "$VAULT/.venv"
+    if ! "$py" -m venv "$VAULT/.venv" 2>"$VAULT/.pluto/venv-error.log"; then
+      warn "could not create the virtualenv:"
+      sed 's/^/      /' "$VAULT/.pluto/venv-error.log" >&2 || true
+      info "the vault, launcher and hooks are fine; re-run with --semantic once fixed"
+      rm -rf "$VAULT/.venv"
+      SKIPPED_TIERS="$SKIPPED_TIERS semantic"
+      return 0
+    fi
+    rm -f "$VAULT/.pluto/venv-error.log"
     ok "venv created"
   else
     skip "venv exists"
   fi
   VENV_PY="$VAULT/.venv/bin/python"
 
-  "$VENV_PY" -m pip install --quiet --upgrade pip
-  "$VENV_PY" -m pip install --quiet mcp sqlite-vec
+  if ! "$VENV_PY" -m pip install --quiet --upgrade pip >/dev/null 2>&1 \
+     || ! "$VENV_PY" -m pip install --quiet mcp sqlite-vec; then
+    warn "pip could not install mcp and sqlite-vec (offline, or a proxy in the way)"
+    info "retry later with: ./install.sh --semantic"
+    VENV_PY=""
+    SKIPPED_TIERS="$SKIPPED_TIERS semantic"
+    return 0
+  fi
   ok "mcp + sqlite-vec installed"
 
   if ! have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
