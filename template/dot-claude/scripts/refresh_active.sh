@@ -13,6 +13,20 @@ set -u
 PLUTO="${PLUTO_HOME:-$HOME/pluto}"
 . "$PLUTO/bin/_pluto_registry.sh"
 
+# BSD and GNU disagree about both of the tools this script leans on. macOS ships BSD, Linux
+# ships GNU, and the flags are not merely different spellings — `stat -f` on GNU means
+# "filesystem", so it fails rather than misbehaving, and the mtime column silently comes out
+# empty. Probe once, then use the right pair.
+# The stat flags have to be plain variables, not a wrapper function: `find -exec` runs a
+# real binary and cannot see shell functions.
+if stat -f '%m' . >/dev/null 2>&1; then
+  STAT_FLAG=-f; STAT_FMT='%m %N'                # BSD / macOS
+  date_ymd() { date -r "$1" '+%Y-%m-%d'; }
+else
+  STAT_FLAG=-c; STAT_FMT='%Y %n'                # GNU / Linux
+  date_ymd() { date -d "@$1" '+%Y-%m-%d'; }
+fi
+
 # NOTE is the status column. It is read to consume the third field — the intent half
 # belongs in context.md, written by hand, not echoed back from the registry.
 # shellcheck disable=SC2034
@@ -50,10 +64,16 @@ while IFS=$'\t' read -r NAME DIR NOTE; do
     # Not under git; mtime is the only "when did this move" signal available.
     # build/ is excluded so a rebuild doesn't mask the source file that actually changed.
     NEWEST="$(find "$DIR" -type f -not -path '*/.*' -not -path '*/build/*' \
-                -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | head -1)"
-    TS="${NEWEST%% *}"
-    FILE="${NEWEST#* }"
-    printf -- '- %s — not under git, last touched %s (%s)\n' \
-      "$NAME" "$(date -r "${TS:-0}" '+%Y-%m-%d')" "$(basename "${FILE:-none}")"
+                -exec stat "$STAT_FLAG" "$STAT_FMT" {} + 2>/dev/null | sort -rn | head -1)"
+    if [ -z "$NEWEST" ]; then
+      # A registered directory with nothing in it yet — newly created, or everything in it
+      # is hidden. Saying "last touched 1970-01-01" would be a lie dressed as data.
+      printf -- '- %s — not under git, no files yet\n' "$NAME"
+    else
+      TS="${NEWEST%% *}"
+      FILE="${NEWEST#* }"
+      printf -- '- %s — not under git, last touched %s (%s)\n' \
+        "$NAME" "$(date_ymd "$TS")" "$(basename "$FILE")"
+    fi
   fi
 done < <(registry)
