@@ -1038,6 +1038,27 @@ phase_cloud() {
   fi
 }
 
+# A repo with no commits is not a backup, and it is not a history either: `git log` is an
+# error, `git bundle --all` refuses outright, and the uninstaller's safety net cannot be
+# written. install.sh created the repo, so it finishes the job.
+phase_commit() {
+  [ -d "$VAULT/.git" ] || return 0
+  git -C "$VAULT" rev-parse HEAD >/dev/null 2>&1 && return 0
+  step "first commit"
+  if [ -n "$DRY_RUN" ]; then dim "git add -A && git commit"; return 0; fi
+  # Only supply an identity when the machine has none, so a configured user stays the author.
+  local id=()
+  if ! git -C "$VAULT" config user.email >/dev/null 2>&1; then
+    id=(-c "user.name=pluto" -c "user.email=pluto@localhost")
+  fi
+  git -C "$VAULT" add -A
+  if git -C "$VAULT" ${id[@]+"${id[@]}"} commit -q -m "pluto: initial vault"; then
+    ok "committed $(git -C "$VAULT" rev-list --count HEAD) revision on $(git -C "$VAULT" branch --show-current)"
+  else
+    warn "could not make the first commit — 'git -C $(rel "$VAULT") commit' by hand"
+  fi
+}
+
 phase_verify() {
   step "PHASE 9 — verify"
   if [ -n "$DRY_RUN" ]; then skip "dry run — nothing to verify"; return 0; fi
@@ -1053,6 +1074,7 @@ phase_verify() {
   check "hooks parse"          bash -c 'for h in "$1"/.claude/hooks/*.sh; do bash -n "$h" || exit 1; done' _ "$VAULT"
   check "settings.json valid"  python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$VAULT/.claude/settings.json"
   check "git repo"             git -C "$VAULT" rev-parse --git-dir
+  check "has a commit"         git -C "$VAULT" rev-parse HEAD
   check "registry reads"       bash -c 'PLUTO="$1"; . "$1/bin/_pluto_registry.sh"; registry | grep -q .' _ "$VAULT"
   check "resolves a project"   bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --path pluto' _ "$VAULT"
   check "free text dispatches" bash -c 'cd /; PLUTO_DRY_RUN=1 PLUTO_HOME="$1" "$1/bin/pluto" what should I work on' _ "$VAULT"
@@ -1110,5 +1132,6 @@ phase_global
 phase_shell
 phase_extras
 phase_cloud
+phase_commit
 phase_verify
 report
