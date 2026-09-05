@@ -145,8 +145,14 @@ Required:
 Optional, per tier:
 
 - [Ollama](https://ollama.com) and roughly 1 GB of disk for the embedding model, for
-  semantic search
+  semantic search. On Linux the installer can install Ollama for you; its own installer
+  needs `curl`, `tar` and `zstd`, which are pulled in first so you do not discover them one
+  failed run at a time.
 - `age` and `coreutils`, for encrypted backup
+
+Not required: `curl`. Every HTTP call here prefers `curl`, falls back to `wget`, and falls
+back again to `python3`, which is already required — so a machine with none of the usual
+download tools still works.
 
 ### On Debian and Ubuntu
 
@@ -319,6 +325,11 @@ stores the vectors in sqlite-vec. Nothing leaves the machine.
 
 The index refuses to run against a schema built by a different model or metric rather than
 silently returning nonsense, because vectors from different models are not comparable.
+
+If nothing is listening once Ollama is installed, the installer offers to run
+`ollama serve` in the background and waits for it. That is what happens on a container or
+on WSL, where the systemd unit its installer writes is never started. It is a background
+process rather than a service: it stops when the machine does.
 
 Ollama does not have to be on the same machine:
 

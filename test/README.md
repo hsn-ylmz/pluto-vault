@@ -22,17 +22,19 @@ docker run --rm -v "$PWD":/src:ro \
 
 ## Why two images
 
-`Dockerfile.ubuntu` installs `git`, `python3`, `curl` and `zsh`, and nothing else. That is
-the state Ubuntu actually ships in, including `python3` without `ensurepip`, so
-`python3 -m venv` fails.
+`Dockerfile.ubuntu` installs `git`, `python3`, `ca-certificates` and `zsh`. No
+`python3-venv`, no `curl`, no `sudo` — the state a minimal Ubuntu actually ships in.
+`ca-certificates` stays only because without it nothing can speak TLS at all, which is a
+different problem from the one this image exists for.
 
-`Dockerfile.debian` additionally installs `python3-venv`, which makes it a happy-path
-image.
+`Dockerfile.debian` additionally installs `python3-venv` and `curl`, which makes it a
+happy-path image.
 
-That difference is the point. The Debian image was written first, its `python3-venv` line
-looked like ordinary setup, and it hid a real bug completely: the installer selected an
-interpreter that could not build a virtualenv, then aborted mid-run under `set -e` and
-left a half-configured machine. It was only found when someone ran it on stock Ubuntu.
+That difference is the point. The Debian image was written first, and its `python3-venv`
+and `curl` lines looked like ordinary setup. Each hid a real bug completely: an interpreter
+that could not build a virtualenv and then aborted the whole install under `set -e`, and an
+Ollama probe that reported the endpoint dead on any machine without curl. Both were found
+only by running on a real, unprepared Ubuntu box.
 
 A test environment that installs the dependency you are trying to test for is not a test
 environment. Keep the Ubuntu image bare.
