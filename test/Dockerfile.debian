@@ -1,0 +1,17 @@
+# A machine that has never seen pluto. Debian, not macOS, on purpose: if the installer
+# only works where it was written, it does not work.
+#
+# NOTE: this image installs python3-venv. That is a convenience for testing the happy
+# path, and it once hid a real bug — see Dockerfile.ubuntu, which installs nothing.
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git python3 python3-venv python3-pip curl ca-certificates zsh bash procps less \
+    && rm -rf /var/lib/apt/lists/*
+
+# A normal, non-root user with a normal shell.
+RUN useradd -m -s /bin/zsh tester
+USER tester
+WORKDIR /home/tester
+ENV SHELL=/bin/zsh
+CMD ["/bin/zsh", "-l"]

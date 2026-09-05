@@ -109,11 +109,26 @@ Optional, per tier:
   semantic search
 - `age` and `coreutils`, for encrypted backup
 
-The installer checks the requirement that actually bites first. macOS system `python3` is
-frequently built without sqlite extension support, which `sqlite-vec` needs, and the
-failure otherwise surfaces as an `ImportError` several hundred megabytes into a model
-download. Pluto looks for an interpreter that can load extensions before fetching
-anything, and tells you which one it picked.
+### On Debian and Ubuntu
+
+Stock Debian and Ubuntu ship `python3` with `ensurepip` split into a separate package, so
+`python3 -m venv` fails out of the box with an error about ensurepip. The semantic tier
+needs a virtualenv, so install this first if you want it:
+
+```bash
+sudo apt install python3-venv        # or python3.12-venv, matching your python3
+```
+
+You do not have to do this before installing. The installer detects it, names the exact
+package for your machine, offers to run the command, and completes the core install
+regardless. Add the tier afterwards with `./install.sh --semantic`.
+
+### The check that runs before anything is downloaded
+
+macOS system `python3` is frequently built without sqlite extension support, which
+`sqlite-vec` needs, and Debian's is frequently missing `ensurepip`. Either failure would
+otherwise surface after a gigabyte of model download. Pluto tests both before fetching
+anything, picks an interpreter that satisfies both, and tells you which one it chose.
 
 ---
 
@@ -395,11 +410,19 @@ between BSD and GNU are probed at runtime rather than assumed.
 
 `backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
 
-Verified end to end on both:
+Verified end to end on all of these:
 
 - a clean-room install into an isolated `HOME` on macOS, every tier
 - a `git clone` and install on a Debian container that had never seen pluto, with the
   embedding model served from another host
+- stock Ubuntu with no `python3-venv`, which is the state Ubuntu actually ships in
+- recovery on Ubuntu from a virtualenv left half-built by an interrupted install
+
+The container definitions for those runs are in [`test/`](test/), because a from-zero
+claim is worth exactly as much as the clean room you can prove it in. The Ubuntu image
+deliberately installs nothing beyond `git`, `python3`, `curl` and `zsh`: an earlier
+version of the Debian image pre-installed `python3-venv`, and that single convenience hid
+a real bug from testing entirely.
 
 The installer finishes with a verify phase of 15 checks, including a JSON-RPC round-trip
 against the MCP server. That phase has caught real bugs, which is the only reason to have
@@ -432,6 +455,26 @@ metric. Delete `.pluto/index.db` and reindex; mixing them returns confident nons
 
 **`sqlite-vec` will not import.** Your `python3` cannot load sqlite extensions. Install one
 that can, for example `brew install python@3.13`, and re-run with `--semantic`.
+
+**"The virtual environment was not created successfully because ensurepip is not
+available."** Debian and Ubuntu package `ensurepip` separately:
+
+```bash
+sudo apt install python3-venv
+./install.sh --semantic
+```
+
+The core install is unaffected by this; only the semantic tier waits.
+
+**The semantic tier says it is already installed, but `sqlite-vec` and the MCP server fail
+verification.** An earlier install was interrupted after the virtualenv directory was
+created but before its packages went in. Current versions detect this and rebuild it. If
+you are on an older copy, delete it and re-run:
+
+```bash
+rm -rf ~/pluto/.venv
+./install.sh --semantic
+```
 
 ---
 
