@@ -989,8 +989,9 @@ phase_cloud() {
     return 0
   fi
 
-  info "sync is a private git remote. Real merge semantics; a file-sync daemon over a git"
-  info "repo gives you 'file (1).md' and a broken index."
+  info "sync is a private git remote of your own: create an empty private repo on your"
+  info "host of choice and paste its URL. Leave it empty and the vault stays local."
+  info "Real merge semantics; a file-sync daemon over a git repo gives you 'file (1).md'."
   local remote
   remote="$(ask "git remote URL (empty to skip):" "")"
   if [ -n "$remote" ]; then

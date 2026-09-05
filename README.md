@@ -481,9 +481,17 @@ for you to add by hand.
 
 ## Sync and backup
 
-Sync is a private git remote. Git gives real merge semantics; a file-sync daemon over a
-git repo gives you `file (1).md` and a broken index. Do not put this vault in a folder
-managed by Dropbox, iCloud Drive or Google Drive.
+Sync is a private git remote of **your own** — your GitHub, GitLab, or any host you can
+push to. Create an empty private repo, then give the installer its URL, or add it later
+with `git -C ~/pluto remote add origin <your-url>`. Nothing here ships a remote, defaults
+to one, or has any account baked in: the installer asks, the field starts empty, and if
+you leave it empty your vault stays a local git repo.
+
+Your vault is your notes. Keep that repo private.
+
+Git gives real merge semantics; a file-sync daemon over a git repo gives you
+`file (1).md` and a broken index. Do not put this vault in a folder managed by Dropbox,
+iCloud Drive or Google Drive.
 
 Backup is separate and encrypted. `backup.sh` bundles the whole repo with
 `git bundle --all`, encrypts it with `age -p`, and copies it to a cloud folder. The
