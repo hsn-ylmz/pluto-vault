@@ -332,22 +332,31 @@ installer testable against throwaway vaults without reaching into a real environ
 
 ## Shell integration
 
-The installer writes two blocks, into two files, because they answer different questions.
+Which file a line goes in decides whether `pluto` exists at all, so the installer is
+specific about it.
 
-Environment goes where **every** shell reads it, `~/.zshenv` for zsh or `~/.profile`
-otherwise:
+| Shell | File | Read by |
+|---|---|---|
+| zsh | `~/.zshenv` | every zsh, including scripts and `ssh host 'pluto ...'` |
+| zsh | `~/.zshrc` | interactive shells only |
+| bash | `~/.profile` | login shells only |
+| bash | `~/.bashrc` | interactive non-login shells, which is what a terminal window is |
 
-```zsh
+`PLUTO_HOME` and `PATH` go where every shell reads them:
+
+```sh
 export PLUTO_HOME="$HOME/pluto"
 case ":$PATH:" in *":$HOME/pluto/bin:"*) ;; *) export PATH="$HOME/pluto/bin:$PATH" ;; esac
 ```
 
-zsh reads `.zshrc` only for interactive shells. Environment placed there leaves `pluto`
-missing from scripts, from `ssh host 'pluto --names'`, and from CI. The `PATH` line is
-append-guarded so repeated sourcing cannot stack duplicates.
+For zsh that is `.zshenv` and nothing else. For bash it goes in **both** `.profile` and
+`.bashrc`: neither covers both cases on its own, and Ubuntu's stock `.bashrc` does not
+source `.profile`. Environment in `.profile` alone gives you `pluto: not found` in an
+ordinary terminal. The `PATH` line is append-guarded, so repeated sourcing cannot stack
+duplicates.
 
-Interactive-only pieces go in `~/.zshrc` or `~/.bashrc`, since an alias and a completion
-mean nothing without a keyboard:
+The interactive pieces go in `.zshrc` or `.bashrc`, since an alias and a completion mean
+nothing without a keyboard:
 
 ```zsh
 alias pluto='noglob pluto'
@@ -355,10 +364,9 @@ alias pluto='noglob pluto'
 [ -f "$PLUTO_HOME/completions/pluto.zsh" ] && source "$PLUTO_HOME/completions/pluto.zsh"
 ```
 
-Both blocks are delimited by markers, so re-running never duplicates them, and
-`--no-shell` skips the whole thing and prints the lines for you to add by hand.
-
----
+Each block carries its own marker, so re-running never duplicates either one, and a file
+holding both stays idempotent per block. `--no-shell` skips all of it and prints the lines
+for you to add by hand.
 
 ## Sync and backup
 
@@ -432,8 +440,10 @@ one.
 
 ## Troubleshooting
 
-**`pluto: command not found` in a script or over ssh.** The environment block belongs in
-`~/.zshenv`, not `~/.zshrc`. Re-run the installer, or move the two lines yourself.
+**`pluto: command not found` right after a successful install.** You are in a shell that
+never read the file the environment went into. `source ~/.profile` fixes the session; for a
+real fix the environment belongs in `~/.zshenv` for zsh, and in both `~/.profile` and
+`~/.bashrc` for bash. Re-running the installer writes them correctly.
 
 **`zsh: no matches found: safely?`** The `noglob` alias is missing. It is added to your
 interactive rc by the installer; open a new shell, or add

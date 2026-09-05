@@ -597,14 +597,14 @@ emit_interactive_block() { # IS_ZSH
   printf '%s\n' "# <<< pluto (interactive) <<<"
 }
 
-append_block() { # FILE MARKER EMITTER [ARG]
-  local f="$1" marker="$2" fn="$3" arg="${4:-}"
+append_block() { # FILE MARKER LABEL EMITTER [ARG]
+  local f="$1" marker="$2" label="$3" fn="$4" arg="${5:-}"
   if [ -f "$f" ] && grep -q "$marker" "$f" 2>/dev/null; then
-    skip "$(rel "$f") already has it"
+    skip "$(rel "$f") already has the $label block"
     return 0
   fi
   "$fn" "$arg" >> "$f"
-  ok "$(rel "$f")"
+  ok "$(rel "$f")  ($label)"
 }
 
 phase_shell() {
@@ -637,10 +637,10 @@ phase_shell() {
   fi
 
   for f in $env_files; do
-    append_block "$f" "# >>> pluto >>>" emit_env_block
+    append_block "$f" "# >>> pluto >>>" env emit_env_block
   done
   if [ -n "$inter_file" ]; then
-    append_block "$inter_file" "# >>> pluto (interactive) >>>" emit_interactive_block "$is_zsh"
+    append_block "$inter_file" "# >>> pluto (interactive) >>>" completion emit_interactive_block "$is_zsh"
   fi
   info "open a new shell to pick it up"
 }
