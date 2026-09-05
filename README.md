@@ -34,6 +34,7 @@ your dependency. Fork it and change it.
 - [Command reference](#command-reference)
 - [Free text](#free-text)
 - [Model tier](#model-tier)
+- [Local commands](#local-commands)
 - [Adding projects and completion](#adding-projects-and-completion)
 - [Agents](#agents)
 - [Semantic search](#semantic-search)
@@ -318,6 +319,41 @@ On a shell that has never run `compinit`, the installer bootstraps it; on a conf
 shell it stays out of the way.
 
 ---
+
+## Local commands
+
+Anything machine-specific goes in `$PLUTO/bin/pluto-local.sh` rather than in the launcher.
+The installer has no template for that file, so it is never written, never diffed and
+never overwritten: your commands survive every re-install and every upgrade.
+
+```bash
+cp docs/pluto-local.example.sh ~/pluto/bin/pluto-local.sh
+```
+
+It is sourced after every one of the launcher's own functions is defined, so it can call
+`registry`, `resolve`, `resolve_or_die`, `launch`, `die`, `confirm` and the rest, and
+before dispatch, so it can add commands.
+
+```bash
+pluto_local_dispatch() {
+  case "${1:-}" in
+    --note) shift; printf -- '- %s\n' "$*" >> "$PLUTO/daily/$(date +%F).md"; return 0 ;;
+  esac
+  return 1        # not mine; let pluto carry on
+}
+
+pluto_local_commands() {        # optional, for --help
+  printf '%s\n' '--note:append a line to today log'
+}
+```
+
+Return 0 when you handled the command and pluto exits; return non-zero and pluto continues
+with its own dispatch. Its own commands are matched **first**, so a local file cannot
+shadow `--list` or `--status` even by accident, and project names and free text are still
+reached when nothing local matches.
+
+The uninstaller knows about it too: it removes `bin/pluto` and `bin/_pluto_registry.sh` by
+name rather than deleting `bin/`, and tells you the file was kept.
 
 ## Agents
 

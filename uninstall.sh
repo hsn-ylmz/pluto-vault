@@ -233,7 +233,15 @@ gone "$VAULT/.claude/hooks/.state"
 # ----------------------------------------------------------------------------- 4. code
 
 step "4. installed code in the vault"
-gone "$VAULT/bin"
+# Not `rm -rf bin`: bin/pluto-local.sh is yours, has no template, and is exactly the file
+# someone put work into. Remove what was installed and say what was left.
+gone "$VAULT/bin/pluto"
+gone "$VAULT/bin/_pluto_registry.sh"
+if [ -f "$VAULT/bin/pluto-local.sh" ]; then
+  info "kept $(rel "$VAULT/bin/pluto-local.sh") — your own commands, never installed by pluto"
+elif [ -d "$VAULT/bin" ] && [ -z "$(ls -A "$VAULT/bin" 2>/dev/null)" ]; then
+  gone "$VAULT/bin"
+fi
 gone "$VAULT/completions"
 gone "$VAULT/.claude"
 gone "$VAULT/.mcp.json"

@@ -320,6 +320,16 @@ COMPLETION
   Completion for zsh and bash ships in $PLUTO/completions. The installer's shell block
   sources the right one; both read --names, so they never go stale.
 
+LOCAL COMMANDS
+  $PLUTO/bin/pluto-local.sh, if it exists, is sourced before dispatch and can add
+  commands of your own. install.sh has no template for it, so it survives every
+  re-install: put machine-specific things there rather than editing this file.
+
+  Define pluto_local_dispatch (return 0 if you handled the command) and optionally
+  pluto_local_commands (one "name:description" per line). pluto's own commands are
+  matched first and cannot be shadowed.
+$(local_commands | awk -F: 'NF{ printf "      %-24s %s\n", $1, substr($0, index($0,":")+1) }')
+
 REGISTRY
   $PLUTO/projects/*.md — one file per project, 'path:' in its frontmatter.
   Edit them directly or use --create / --edit / --remove.
@@ -534,6 +544,31 @@ pick() { # -> selected registry row on stdout, empty if cancelled
   fi
 }
 
+# ------------------------------------------------------------------------------- local
+#
+# $PLUTO/bin/pluto-local.sh, when it exists, is sourced here: after every function above is
+# defined, so it can use registry(), resolve(), launch(), die() and the rest, and before
+# dispatch, so it can add commands.
+#
+# install.sh has no template for it and never writes or overwrites it, so whatever you put
+# there survives every re-install. That is the point: this file is the seam between the
+# tool and the things only you run.
+#
+# Define one or both:
+#   pluto_local_dispatch "$@"   handle a command. Return 0 if you handled it (pluto then
+#                               exits), non-zero to let pluto carry on as normal.
+#   pluto_local_commands        optional, one "name:description" per line, for --help.
+#
+# pluto's own commands are matched first and cannot be shadowed.
+if [ -f "$PLUTO/bin/pluto-local.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$PLUTO/bin/pluto-local.sh"
+fi
+
+local_commands() {
+  if type pluto_local_commands >/dev/null 2>&1; then pluto_local_commands; fi
+}
+
 # -------------------------------------------------------------------------- dispatch
 
 # Tier flags are consumed first so they can lead anything: a question, a project name,
@@ -560,8 +595,14 @@ case "${1:-}" in
   --ask)       shift; cmd_ask "$@" ;;
 esac
 
-# pluto NAME [claude args...] / pluto <free text> — a leading '-' means it is a flag
-# for claude, not a project name, so fall through to the picker and forward it.
+# Local commands come after pluto's own and before project names, so `pluto --mail` can
+# reach a local handler while `pluto --list` can never be shadowed by one.
+if type pluto_local_dispatch >/dev/null 2>&1 && [ $# -gt 0 ]; then
+  if pluto_local_dispatch "$@"; then exit 0; fi
+fi
+
+# pluto NAME [agent args...] / pluto <free text> — a leading '-' means it is a flag for
+# the agent, not a project name, so fall through to the picker and forward it.
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
   target="$(resolve "$1")"
 
