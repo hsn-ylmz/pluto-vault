@@ -1,10 +1,13 @@
 # Stock Ubuntu with NOTHING pre-fixed. python3 is present because Ubuntu ships it;
 # python3-venv is deliberately absent, which is Ubuntu's default state.
 FROM ubuntu:24.04
+# No curl, no sudo: both are absent on real minimal images and both hid bugs.
+# ca-certificates stays because without it nothing can speak TLS at all, which is a
+# different problem from the one this image is for.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git python3 curl ca-certificates zsh sudo \
+      git python3 ca-certificates zsh \
     && rm -rf /var/lib/apt/lists/*
-RUN useradd -m -s /bin/zsh tester && echo "tester ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/tester
+RUN useradd -m -s /bin/zsh tester
 USER tester
 WORKDIR /home/tester
 ENV SHELL=/bin/zsh

@@ -139,6 +139,31 @@ put_content() { # TEMPLATE_REL DST_REL
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# curl is not on a stock Ubuntu image, and every probe here was written as if it were.
+# python3 is already a hard requirement, so it is the one fetcher guaranteed to exist;
+# curl and wget are preferred only because they are faster to start.
+http_get() { # URL [TIMEOUT] -> body on stdout
+  local url="$1" t="${2:-10}"
+  if have curl; then
+    curl -fsSL -m "$t" "$url"
+  elif have wget; then
+    wget -qO- --timeout="$t" "$url"
+  else
+    python3 - "$url" "$t" <<'PY'
+import sys, urllib.request
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=float(sys.argv[2])) as r:
+        sys.stdout.write(r.read().decode("utf-8", "replace"))
+except Exception:
+    sys.exit(1)
+PY
+  fi
+}
+
+http_ok() { # URL [TIMEOUT] -> 0 if it answers
+  http_get "$1" "${2:-3}" >/dev/null 2>&1
+}
+
 # Package managers are loud, and a wall of dpkg progress buries the one line that says what
 # pluto actually did. Keep the output, show it only when it turns out to matter.
 run_quiet() { # DESCRIPTION COMMAND
@@ -271,6 +296,7 @@ offer_homebrew() {
   info "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/brew/HEAD/install.sh)\""
   [ -n "$DRY_RUN" ] && return 1
   confirm "install Homebrew now? (fetches and runs a script from the network)" n || return 1
+  have curl || { warn "the Homebrew installer needs curl, which is missing"; return 1; }
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/brew/HEAD/install.sh)" || return 1
   # A fresh install is not on PATH in this shell yet.
   for c in /opt/homebrew/bin/brew /usr/local/bin/brew; do
@@ -554,7 +580,7 @@ phase_semantic() {
   fi
   ok "mcp + sqlite-vec installed"
 
-  if ! have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
+  if ! have ollama && ! http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags"; then
     install_ollama || {
       warn "no ollama — index and search will not work until it is installed"
       info "already running one elsewhere? export PLUTO_OLLAMA_URL=http://host:11434"
@@ -567,21 +593,21 @@ phase_semantic() {
   # The Linux installer sets up a systemd unit; inside a container, or on a box without
   # systemd, nothing is listening yet and every later step would fail on a connection
   # refused that says nothing about the cause.
-  if ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
+  if ! http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags"; then
     if have systemctl && systemctl start ollama >/dev/null 2>&1; then
       sleep 2
     fi
   fi
 
   local ollama_url="${PLUTO_OLLAMA_URL:-http://localhost:11434}"
-  if ! curl -sf -m 3 "$ollama_url/api/tags" >/dev/null 2>&1; then
+  if ! http_ok "$ollama_url/api/tags"; then
     warn "ollama not responding at $ollama_url"
     info "start it (\`ollama serve\`, or open the app), then run:"
     info "  $VENV_PY $VAULT/.claude/scripts/pluto_index.py"
     return 0
   fi
 
-  if curl -sf -m 5 "$ollama_url/api/tags" 2>/dev/null | grep -q "nomic-embed-text-v2-moe"; then
+  if http_get "$ollama_url/api/tags" 5 2>/dev/null | grep -q "nomic-embed-text-v2-moe"; then
     skip "embedding model already pulled"
   elif have ollama; then
     info "pulling nomic-embed-text-v2-moe (~1 GB)"
@@ -673,7 +699,11 @@ install_ollama() {
       info "Ollama's documented Linux install is a script fetched from the network:"
       dim "  curl -fsSL https://ollama.com/install.sh | sh"
       confirm "run it?" y || return 1
-      have curl || { warn "curl is required to install ollama that way"; return 1; }
+      # Not just for fetching the script: ollama's installer shells out to curl itself,
+      # so having wget or python3 instead is not enough here.
+      if ! have curl; then
+        ensure_tool curl curl y "the Ollama installer needs curl, and it is not installed" || return 1
+      fi
       run_quiet "installing ollama" "curl -fsSL https://ollama.com/install.sh | sh" || return 1
       record_installed script ollama
       ;;
@@ -1017,7 +1047,7 @@ report() {
   elif [ -n "$AGENT_CMD" ]; then
     dim "  sign in to $AGENT_CMD once before the first session; pluto never touches credentials"
   fi
-  if have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
+  if have ollama && ! http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags"; then
     dim "  ollama is installed but not serving yet:  ollama serve"
   fi
   [ -n "$SKIPPED_TIERS" ] && info "skipped:  $SKIPPED_TIERS"
