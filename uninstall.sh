@@ -75,6 +75,26 @@ VAULT="${VAULT/#\~/$HOME}"
 
 rel() { case "$1" in "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;; *) printf '%s\n' "$1" ;; esac; }
 
+# Same rule as install.sh: root needs no sudo, and minimal images ship without the binary.
+# Hardcoding it here made every package removal fail for the root user.
+if [ "$(id -u)" = 0 ]; then
+  SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo "
+else
+  SUDO=""
+fi
+
+run_quiet() { # DESCRIPTION COMMAND
+  local desc="$1" cmd="$2" log
+  log="$(mktemp)"
+  if sh -c "$cmd" >"$log" 2>&1; then rm -f "$log"; return 0; fi
+  warn "$desc failed:"
+  tail -12 "$log" | sed 's/^/      /' >&2
+  rm -f "$log"
+  return 1
+}
+
 gone() { # PATH
   if [ ! -e "$1" ]; then return 0; fi
   if [ -n "$DRY_RUN" ]; then dim "would remove $(rel "$1")"; return 0; fi
@@ -229,27 +249,27 @@ else
     cmd=""
     case "$kind" in
       brew)         cmd="brew uninstall $name" ;;
-      apt)          cmd="sudo apt remove -y $name" ;;
-      dnf)          cmd="sudo dnf remove -y $name" ;;
-      pacman)       cmd="sudo pacman -Rs --noconfirm $name" ;;
-      zypper)       cmd="sudo zypper remove -y $name" ;;
+      apt)          cmd="${SUDO}apt remove -y $name" ;;
+      dnf)          cmd="${SUDO}dnf remove -y $name" ;;
+      pacman)       cmd="${SUDO}pacman -Rs --noconfirm $name" ;;
+      zypper)       cmd="${SUDO}zypper remove -y $name" ;;
       ollama-model) cmd="ollama rm $name" ;;
       npm)          cmd="npm uninstall -g $name" ;;
       script)
         if [ "$name" = ollama ]; then
           info "ollama was installed by its own script; the documented removal is:"
-          dim "  sudo systemctl stop ollama && sudo systemctl disable ollama"
-          dim "  sudo rm /etc/systemd/system/ollama.service"
-          dim "  sudo rm \$(command -v ollama)"
-          dim "  sudo rm -r /usr/share/ollama && sudo userdel ollama && sudo groupdel ollama"
-          confirm "run that now?" n && {
-            sudo systemctl stop ollama >/dev/null 2>&1 || true
-            sudo systemctl disable ollama >/dev/null 2>&1 || true
-            sudo rm -f /etc/systemd/system/ollama.service || true
-            sudo rm -f "$(command -v ollama 2>/dev/null || echo /usr/local/bin/ollama)" || true
-            sudo rm -rf /usr/share/ollama || true
-            sudo userdel ollama >/dev/null 2>&1 || true
-            sudo groupdel ollama >/dev/null 2>&1 || true
+          dim "  ${SUDO}systemctl stop ollama && ${SUDO}systemctl disable ollama"
+          dim "  ${SUDO}rm /etc/systemd/system/ollama.service"
+          dim "  ${SUDO}rm \$(command -v ollama)"
+          dim "  ${SUDO}rm -r /usr/share/ollama && ${SUDO}userdel ollama && ${SUDO}groupdel ollama"
+          confirm "run that now?" y && {
+            ${SUDO}systemctl stop ollama >/dev/null 2>&1 || true
+            ${SUDO}systemctl disable ollama >/dev/null 2>&1 || true
+            ${SUDO}rm -f /etc/systemd/system/ollama.service || true
+            ${SUDO}rm -f "$(command -v ollama 2>/dev/null || echo /usr/local/bin/ollama)" || true
+            ${SUDO}rm -rf /usr/share/ollama || true
+            ${SUDO}userdel ollama >/dev/null 2>&1 || true
+            ${SUDO}groupdel ollama >/dev/null 2>&1 || true
             ok "ollama removed"
           }
         fi
@@ -261,7 +281,7 @@ else
     [ -n "$cmd" ] || continue
     info "  $cmd"
     if [ -n "$DRY_RUN" ]; then continue; fi
-    confirm "remove $name?" y && { sh -c "$cmd" >/dev/null 2>&1 && ok "$name removed" || warn "$name: that failed"; }
+    confirm "remove $name?" y && { run_quiet "removing $name" "$cmd" && ok "$name removed" || true; }
   done < "$MANIFEST"
 fi
 
