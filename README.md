@@ -28,6 +28,7 @@ your dependency. Fork it and change it.
 ## Contents
 
 - [Install](#install)
+- [Uninstall](#uninstall)
 - [Requirements](#requirements)
 - [What you get](#what-you-get)
 - [Command reference](#command-reference)
@@ -92,6 +93,35 @@ Re-running is safe and is the supported way to upgrade. See
 ```
 
 ---
+
+## Uninstall
+
+```bash
+./uninstall.sh              # everything pluto installed; your notes are kept
+./uninstall.sh --dry-run    # show what that would remove
+./uninstall.sh --everything # the notes as well, after confirming
+```
+
+Six steps, safest first, each one confirmed:
+
+1. the pluto blocks in your shell rc files
+2. the global layer in `~/.claude`: hook, `/pref`, the SessionStart entry, the MCP server
+3. generated state in the vault: `.venv`, the embedding index, `settings.local.json`
+4. installed code in the vault: `bin/`, `.claude/`, `completions/`
+5. packages that pluto installed, and only those
+6. your notes and markdown
+
+Two things it will not do. It will not remove a package it did not install: the installer
+records what it installed in `.pluto/installed-by-pluto`, and anything absent from that
+file was on the machine before pluto and is left alone. And it will not delete your notes
+as part of a default run, not even with `--yes`; when you do ask, it offers to write a git
+bundle of the entire history first and stops rather than deleting anything unbacked.
+
+Shell rc files and `~/.claude/settings.json` are edited between markers or by key, never
+rewritten, so the rest of your configuration survives untouched.
+
+Stopping after any step leaves a coherent machine. Stopping after step four leaves a
+directory of markdown that opens in any editor, which is the point of the format.
 
 ## Requirements
 
@@ -417,11 +447,30 @@ Installer flags:
 
 ## Platform support
 
-macOS is the primary target. Linux works: the launcher, hooks, registry, completion,
-semantic tier and MCP server were all exercised on Debian, and the tools that differ
-between BSD and GNU are probed at runtime rather than assumed.
+macOS and Linux, detected in preflight along with the package manager, which the installer
+then reports back to you.
 
-`backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
+| Platform | Package manager | Notes |
+|---|---|---|
+| macOS | Homebrew | if it is missing, that is detected and the install is offered, since it is how macOS gets age, coreutils, fzf and Ollama |
+| Debian, Ubuntu | apt | `python3-venv` is a separate package; see above |
+| Fedora, RHEL | dnf | |
+| Arch | pacman | |
+| openSUSE | zypper | |
+| anything else | none | the core still installs; optional extras are printed for you to install by hand |
+
+Every optional dependency resolves through one mapping, so `age`, `coreutils`, `fzf`, the
+venv module and a python3 with sqlite extensions each produce the right command for your
+machine. Ollama is the exception with no distribution package: macOS uses Homebrew, Linux
+uses the documented install script.
+
+Consent tracks what is actually being run. A package manager that verifies what it
+installs defaults to yes. Anything that pipes a script from the network into a shell,
+which is the Homebrew bootstrap and Ollama on Linux, defaults to no and prints the command
+either way so you can run it yourself.
+
+The tools that differ between BSD and GNU, `stat` and `date`, are probed at runtime rather
+than assumed. `backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
 
 Verified end to end on all of these:
 
