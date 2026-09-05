@@ -152,6 +152,9 @@ ask_dir() { # -> DIR on stdout
 ask_launch() { # PROMPT
   local dir
   dir="$(ask_dir)"
+  # Check before announcing. Printing "asking in ~/pluto" and then failing to start reads
+  # like the routing was the problem, which it was not.
+  [ -n "${PLUTO_DRY_RUN:-}" ] || require_agent
   echo "pluto: asking in $(tildify "$dir")" >&2
   launch "$dir" "$1"
 }
