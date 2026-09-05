@@ -189,6 +189,15 @@ pkg_install_cmd() { # PACKAGE -> the command a human would type
   esac
 }
 
+# What pluto installed, so the uninstaller can remove exactly that and nothing else.
+# Without this record, uninstalling ollama would be a guess about whether it was yours.
+MANIFEST_REL=".pluto/installed-by-pluto"
+record_installed() { # KIND NAME
+  [ -n "$DRY_RUN" ] && return 0
+  mkdir -p "$VAULT/.pluto"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$(date +%F)" >> "$VAULT/$MANIFEST_REL"
+}
+
 # ensure_tool BINARY GENERIC DEFAULT WHY -> 0 if present or installed
 ensure_tool() {
   local bin="$1" generic="$2" def="${3:-y}" why="${4:-}" pkg cmd
@@ -204,7 +213,8 @@ ensure_tool() {
   if [ -n "$DRY_RUN" ]; then dim "would run it"; return 1; fi
   confirm "install it now?" "$def" || return 1
   sh -c "$cmd" || { warn "that failed — run it yourself and re-run this installer"; return 1; }
-  have "$bin"
+  have "$bin" || return 1
+  record_installed "$PKG" "$pkg"
 }
 
 # macOS without Homebrew can install almost none of the optional pieces. Say so once, and
@@ -223,7 +233,8 @@ offer_homebrew() {
     [ -x "$c" ] && eval "$("$c" shellenv)" && break
   done
   detect_platform
-  have brew
+  have brew || return 1
+  record_installed manual homebrew
 }
 
 # python3 must be able to load sqlite extensions or sqlite-vec cannot work. macOS system
@@ -427,6 +438,7 @@ phase_semantic() {
       info "  $fix"
       if [ -z "$DRY_RUN" ] && { [ "$PKG" = brew ] || have sudo; } && confirm "run that now?" y; then
         if sh -c "$fix"; then
+          record_installed "$PKG" "$(pkg_for venv)"
           if pick_python; then py="$PY_CHOSEN"; fi
         else
           warn "that failed — run it yourself, then: ./install.sh --semantic"
@@ -525,6 +537,7 @@ phase_semantic() {
   elif have ollama; then
     info "pulling nomic-embed-text-v2-moe (~1 GB)"
     ollama pull nomic-embed-text-v2-moe
+    record_installed ollama-model nomic-embed-text-v2-moe
   else
     # Remote Ollama, no local CLI to pull with. Say where the model has to come from.
     warn "the embedding model is missing and there is no local ollama to pull it"
@@ -584,6 +597,7 @@ install_ollama() {
       fi
       confirm "ollama is not installed. install it with brew?" y || return 1
       brew install ollama || return 1
+      record_installed brew ollama
       ;;
     linux)
       # Ollama ships no apt/dnf package; the documented path is this script. It is a
@@ -593,6 +607,7 @@ install_ollama() {
       confirm "run that now?" n || return 1
       have curl || { warn "curl is required to install ollama that way"; return 1; }
       curl -fsSL https://ollama.com/install.sh | sh || return 1
+      record_installed script ollama
       ;;
     *)
       info "install ollama from https://ollama.com/download, then re-run with --semantic"
@@ -936,6 +951,8 @@ report() {
   dim "  3. add your projects: pluto --create"
   dim "  4. pluto            # pick a project"
   dim "     pluto --status   # what moved lately"
+  printf '\n'
+  dim "  to undo all of this later:  $(rel "$SRC")/uninstall.sh"
   printf '\n'
 }
 
