@@ -579,7 +579,12 @@ entirely, which matters on container images that ship no `sudo` binary; on a mac
 is neither root nor sudo-capable, the command is printed rather than silently skipped.
 
 The tools that differ between BSD and GNU, `stat` and `date`, are probed at runtime rather
-than assumed. `backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
+than assumed.
+
+The backup tier is effectively macOS-only, though not because `backup.sh` is: the installer
+picks a target by listing `~/Library/CloudStorage`, and finds nothing on Linux. The script
+itself is portable — set `PLUTO_BACKUP_DIR` and it works anywhere, falling back from
+`gtimeout` to `timeout`.
 
 Verified end to end on all of these:
 
