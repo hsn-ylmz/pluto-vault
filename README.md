@@ -54,10 +54,13 @@ your dependency. Fork it and change it.
 ## Install
 
 ```bash
-git clone https://github.com/hsn-ylmz/pluto.git
-cd pluto
+git clone https://github.com/hsn-ylmz/pluto-vault.git
+cd pluto-vault
 ./install.sh
 ```
+
+The repository is `pluto-vault`; the tool it installs is `pluto`. The vault it builds lives
+at `~/pluto` and the command you type is `pluto`.
 
 The installer asks before each optional step and prints everything it would do with
 `--dry-run`. Nothing outside the vault is touched unless you agree to it, and one flag
