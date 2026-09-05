@@ -237,22 +237,7 @@ pluto — open a project with your agent, ask it anything, and manage the regist
 USAGE
   pluto                        pick a project interactively
   pluto NAME [agent args...]   open NAME, forwarding remaining args to the agent
-  pluto TEXT...                ask TEXT, here or in the vault (see MODEL TIER
-  Vault work is daily stuff — a log entry, a capture, a question you want answered
-  rather than researched — so it runs on the cheap model. A registered project is
-  real work and gets your default. Nothing classifies the question; it is the
-  directory, decided with no network call on the launch path.
-
-      pluto how do I clear the DNS cache      vault   -> \$PLUTO_QUICK_MODEL (haiku)
-      pluto api-server audit the parser       project -> your default model
-      pluto -q api-server what does WP2 mean  forced cheap
-      pluto --deep how should I structure     forced default, in the vault
-
-  \$PLUTO_QUICK_MODEL defaults to 'haiku'. Set it empty to turn tiering off.
-  \$PLUTO_DEEP_MODEL is unset, meaning whatever the agent already uses.
-  Only applied when \$PLUTO_AGENT is Claude Code; other agents get their args untouched.
-
-FREE TEXT)
+  pluto TEXT...                ask TEXT, here or in the vault (see FREE TEXT)
 
 AGENT
   \$PLUTO_AGENT, currently '$AGENT'. Any CLI taking [flags] [prompt] works.
@@ -270,6 +255,21 @@ COMMANDS
       --deep                   force the default model for this call
   -h, --help                   this text
       --version
+
+MODEL TIER
+  Vault work is daily stuff — a log entry, a capture, a question you want answered
+  rather than researched — so it runs on the cheap model. A registered project is
+  real work and gets your default. Nothing classifies the question; it is the
+  directory, decided with no network call on the launch path.
+
+      pluto how do I clear the DNS cache      vault   -> \$PLUTO_QUICK_MODEL (haiku)
+      pluto api-server audit the parser       project -> your default model
+      pluto -q api-server what does WP2 mean  forced cheap
+      pluto --deep how should I structure     forced default, in the vault
+
+  \$PLUTO_QUICK_MODEL defaults to 'haiku'. Set it empty to turn tiering off.
+  \$PLUTO_DEEP_MODEL is unset, meaning whatever the agent already uses.
+  Only applied when \$PLUTO_AGENT is Claude Code; other agents get their args untouched.
 
 FREE TEXT
   Anything that is neither a command nor a registered project is a question. It opens
