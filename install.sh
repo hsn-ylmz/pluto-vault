@@ -623,10 +623,12 @@ install_claude_code() {
   [ -n "$DRY_RUN" ] && return 1
   if ! have npm; then
     info "Claude Code installs through npm, which is not here either."
-    ensure_tool npm nodejs n "Node.js provides npm" || return 1
+    ensure_tool npm nodejs y "Node.js provides npm" || return 1
   fi
   info "  npm install -g @anthropic-ai/claude-code"
-  confirm "install Claude Code now?" y || return 1
+  # Installing the binary is all this does. Signing in is a separate, interactive step that
+  # belongs to you, and the installer never touches credentials.
+  confirm "install Claude Code now? (installs the CLI only; you sign in yourself)" y || return 1
   npm install -g @anthropic-ai/claude-code || { warn "npm install failed"; return 1; }
   have claude || return 1
   record_installed npm @anthropic-ai/claude-code
@@ -654,7 +656,7 @@ install_ollama() {
       # network script piped into a shell, so it defaults to no and is printed either way.
       info "Ollama's documented Linux install is a script fetched from the network:"
       dim "  curl -fsSL https://ollama.com/install.sh | sh"
-      confirm "run that now?" n || return 1
+      confirm "run it?" y || return 1
       have curl || { warn "curl is required to install ollama that way"; return 1; }
       curl -fsSL https://ollama.com/install.sh | sh || return 1
       record_installed script ollama
@@ -996,6 +998,11 @@ report() {
   info "files:     $INSTALLED written"
   if [ -n "$AGENT_CMD" ] && ! have "$AGENT_CMD"; then
     warn "'$AGENT_CMD' is still not installed — pluto NAME and free text will not start"
+  elif [ -n "$AGENT_CMD" ]; then
+    dim "  sign in to $AGENT_CMD once before the first session; pluto never touches credentials"
+  fi
+  if have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
+    dim "  ollama is installed but not serving yet:  ollama serve"
   fi
   [ -n "$SKIPPED_TIERS" ] && info "skipped:  $SKIPPED_TIERS"
   printf '\n'
