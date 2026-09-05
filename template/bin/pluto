@@ -325,10 +325,12 @@ LOCAL COMMANDS
   commands of your own. install.sh has no template for it, so it survives every
   re-install: put machine-specific things there rather than editing this file.
 
-  Define pluto_local_dispatch (return 0 if you handled the command) and optionally
-  pluto_local_commands (one "name:description" per line). pluto's own commands are
-  matched first and cannot be shadowed.
+  Define pluto_local_dispatch (return 0 if you handled the command), and optionally
+  pluto_local_commands (one "name:description" per line) and pluto_local_help (a full
+  section, for commands that need more than a line). pluto's own commands are matched
+  first and cannot be shadowed.
 $(local_commands | awk -F: 'NF{ printf "      %-24s %s\n", $1, substr($0, index($0,":")+1) }')
+$(local_help)
 
 REGISTRY
   $PLUTO/projects/*.md — one file per project, 'path:' in its frontmatter.
@@ -558,6 +560,8 @@ pick() { # -> selected registry row on stdout, empty if cancelled
 #   pluto_local_dispatch "$@"   handle a command. Return 0 if you handled it (pluto then
 #                               exits), non-zero to let pluto carry on as normal.
 #   pluto_local_commands        optional, one "name:description" per line, for --help.
+#   pluto_local_help            optional, a full help section printed after that list, for
+#                               commands that need more than one line to explain.
 #
 # pluto's own commands are matched first and cannot be shadowed.
 if [ -f "$PLUTO/bin/pluto-local.sh" ]; then
@@ -567,6 +571,10 @@ fi
 
 local_commands() {
   if type pluto_local_commands >/dev/null 2>&1; then pluto_local_commands; fi
+}
+
+local_help() {
+  if type pluto_local_help >/dev/null 2>&1; then pluto_local_help; fi
 }
 
 # -------------------------------------------------------------------------- dispatch

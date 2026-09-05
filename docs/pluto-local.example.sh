@@ -14,6 +14,19 @@ pluto_local_commands() {
 LIST
 }
 
+# Optional: a full help section, for commands that need more than a one-line summary.
+# Printed after the list above, inside pluto --help.
+pluto_local_help() {
+  cat <<'HELP'
+
+NOTE
+  --note appends one line to today's daily log without starting a session, which is
+  the difference between writing something down and deciding to write something down.
+
+      pluto --note deploy went out at 14:02
+HELP
+}
+
 # Required for commands. Return 0 when you handled it — pluto then exits — and non-zero to
 # let pluto carry on with its own dispatch. pluto's own commands are matched first, so you
 # cannot shadow --list or --status by accident.
