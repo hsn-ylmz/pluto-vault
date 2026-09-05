@@ -2,22 +2,49 @@
 
 Persistent memory for a coding agent, made of plain markdown files you own.
 
-Your agent starts every session knowing nothing. Pluto is a directory of notes plus four
-hooks that put the right ones in front of it — who you are, what you are working on, and the
-corrections you already made once. Everything is a file you can read, edit in any editor, and
-put in git. There is no database of record and no service.
+Your agent starts every session knowing nothing. Pluto is a directory of notes plus a few
+hooks that put the right ones in front of it at the start of every session: who you are,
+what you are working on now, and the corrections you already made once. Everything is a
+file you can read, edit in any editor, grep, and commit. There is no database of record,
+no server, and no background process.
+
+It also ships a launcher, because the other half of the problem is getting to the right
+directory with the right question already typed.
 
 ```
 pluto                                     pick a project, open it
-pluto api-server                           open that one
-pluto api-server why does the test fail    open it, seeded with the question
-pluto how can I clean my mac safely?      just ask, from anywhere
+pluto api-server                          open that one
+pluto api-server why does the test fail   open it, seeded with the question
+pluto how can I clean my mac safely?      just ask, from wherever you are
 pluto --status                            what moved since you last looked
 ```
 
-**This is a reference implementation, not a framework.** It was extracted from a vault that is
-in daily use, and it is published because the design is worth copying, not because it wants to
-become your dependency. Fork it and change it; that is the intended use.
+This is a reference implementation, not a framework. It was extracted from a vault in
+daily use and published because the design is worth copying, not because it wants to be
+your dependency. Fork it and change it.
+
+---
+
+## Contents
+
+- [Install](#install)
+- [Requirements](#requirements)
+- [What you get](#what-you-get)
+- [Command reference](#command-reference)
+- [Free text](#free-text)
+- [Adding projects and completion](#adding-projects-and-completion)
+- [Agents](#agents)
+- [Semantic search](#semantic-search)
+- [Hooks](#hooks)
+- [Upgrading: code versus content](#upgrading-code-versus-content)
+- [Shell integration](#shell-integration)
+- [Sync and backup](#sync-and-backup)
+- [Configuration reference](#configuration-reference)
+- [Platform support](#platform-support)
+- [Troubleshooting](#troubleshooting)
+- [Non-goals](#non-goals)
+
+---
 
 ## Install
 
@@ -27,95 +54,402 @@ cd pluto
 ./install.sh
 ```
 
-The installer asks before it does anything and prints what it would do with `--dry-run`. It is
-safe to re-run: **code** (`bin/`, `.claude/`) is brought up to date every time, **content**
-(`context.md`, `rules.md`, `projects/`, `notes/`, `daily/`) is created once and never touched
-again. That is how you upgrade.
+The installer asks before each optional step and prints everything it would do with
+`--dry-run`. Nothing outside the vault is touched unless you agree to it, and one flag
+(`--no-global`) turns all of that off at once.
+
+Useful variations:
 
 ```bash
-./install.sh --dry-run                    # show everything, write nothing
-./install.sh --vault ~/second-brain       # somewhere else
-./install.sh --no-semantic --no-global    # core only, nothing outside the vault
-./install.sh --semantic                   # add local search to an existing vault later
+./install.sh --dry-run                     show every action, write nothing
+./install.sh --vault ~/second-brain        build it somewhere else
+./install.sh --no-semantic --no-global     core only; writes nothing outside the vault
+./install.sh --semantic                    add local search to an existing vault later
+./install.sh -y                            take the default for every prompt
 ```
 
-## What you get
+Re-running is safe and is the supported way to upgrade. See
+[Upgrading](#upgrading-code-versus-content).
 
-| Tier | Gives you | Cost |
-|---|---|---|
-| **core** | vault, git, session hooks, the `pluto` launcher, `/log` | none — always installed |
-| **semantic** | local embeddings, `search_memory` over everything, MCP server | Ollama + a ~1 GB model |
-| **global** | `preferences.md` injected into *every* project, `/pref` | writes to `~/.claude` |
-| **cloud** | private git remote, age-encrypted offsite bundle | your own remote |
+### What it creates
 
-Declining everything still leaves a working vault. The heavy tier is asked for last and can be
-added later.
-
-## Adding a project
-
-```bash
-pluto --create api-server --path ~/code/api-server --status "the thing that serves the API"
-pluto --create                 # or answer three prompts
+```
+~/pluto/
+  CLAUDE.md            router: load order, where things go, memory protocol
+  context.md           who you are and what is active now; injected every session
+  rules.md             standing corrections; injected every session
+  preferences.md       how you want to be worked with; injected in every project
+  daily/               append-only session logs, YYYY-MM-DD.md
+  notes/               durable knowledge
+  projects/            one file per project; this is also the launcher's registry
+  inbox/               raw capture
+  archive/
+  bin/                 the pluto launcher and the shared registry reader
+  completions/         zsh and bash completion
+  .claude/             hooks, scripts, settings, slash commands
+  .pluto/              the embedding index
+  .venv/               python environment for the semantic tier
 ```
 
-It becomes a usable CLI argument immediately — `pluto api-server` resolves it and TAB
-completion offers it on the next keystroke. Nothing is cached and nothing is regenerated,
-because the completions read `pluto --names`, which reads `projects/*.md`. Completion for
-zsh and bash is installed and wired into your rc file.
-
-The flags exist so project creation can be scripted; with `--path` given it needs no
-terminal at all. Creating a missing directory is never silent — you are asked, or you passed
-`--mkdir`.
-
-## Agents
-
-Claude Code gets the whole thing: session-start injection, the prompt counter, the compaction
-nudge, `/log`, `/pref`, and the launcher.
-
-Every other agent gets the vault through **MCP** — `search_memory`, `write_note`,
-`append_daily`, `reindex` — which is a real integration but not the same one: nothing is
-injected automatically, you have to ask. The installer merges the server into Cursor's config;
-for Codex and others it writes the stdio command to `.pluto/mcp-stdio-command.txt` rather than
-guessing at a config schema that moves.
-
-## How it works
-
-Four hooks, no model calls, zero background spend:
-
-| Hook | Does |
-|---|---|
-| `SessionStart` | injects `context.md` + `rules.md` + the tail of the last daily log |
-| `UserPromptSubmit` | every 20 prompts, reminds you the session is worth logging |
-| `PreCompact` | says "write anything durable down now", before the detail is gone |
-| `SessionEnd` | appends a factual stub — time, prompt count. No invented summary. |
-
-Content lives in five places: `daily/` (append-only session logs), `notes/` (durable),
-`projects/` (one file each), `inbox/` (raw capture), `archive/`.
-
-**The project registry is your notes.** `pluto api-server` resolves through `path:` in the
-frontmatter of `projects/api-server.md` — a file you were going to write anyway. There is no
-second list to keep in sync, so the list can never disagree with reality.
-
-See [docs/DESIGN.md](docs/DESIGN.md) for why it is built this way — the parts that took a
-few wrong turns first.
+---
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel). Linux runs the core; `backup.sh` and the Homebrew paths assume macOS.
-- `git`, `python3`. Bash 3.2 is enough — the shipped scripts target what macOS actually has.
-- Optional: [Ollama](https://ollama.com) for the semantic tier, `age` + `coreutils` for encrypted backup.
+Required:
 
-The installer checks the one that actually bites first: macOS system `python3` is often built
-without sqlite extension support, which `sqlite-vec` needs. It looks for an interpreter that
-has it **before** downloading a gigabyte of model.
+- `git`
+- `python3` (the hooks use it to escape JSON; the semantic tier needs it to load sqlite
+  extensions, which the installer checks for explicitly)
+- bash 3.2 or newer. The shipped scripts target what macOS actually has, so nothing needs
+  a modern bash.
+
+Optional, per tier:
+
+- [Ollama](https://ollama.com) and roughly 1 GB of disk for the embedding model, for
+  semantic search
+- `age` and `coreutils`, for encrypted backup
+
+The installer checks the requirement that actually bites first. macOS system `python3` is
+frequently built without sqlite extension support, which `sqlite-vec` needs, and the
+failure otherwise surfaces as an `ImportError` several hundred megabytes into a model
+download. Pluto looks for an interpreter that can load extensions before fetching
+anything, and tells you which one it picked.
+
+---
+
+## What you get
+
+| Tier | What it adds | What it costs |
+|---|---|---|
+| core | vault, git repo, session hooks, launcher, completion, `/log` | nothing; always installed |
+| semantic | local embeddings, search over everything, MCP server | Ollama and a model download |
+| global | `preferences.md` injected into every project, `/pref` | writes into `~/.claude` |
+| cloud | private git remote, age-encrypted offsite bundle | your own remote |
+
+Declining every optional tier still leaves a working vault, a working launcher and working
+session injection. The heavy tier is offered last, on purpose.
+
+---
+
+## Command reference
+
+```
+pluto                          pick a project interactively (fzf, or a numbered menu)
+pluto NAME [agent args...]     open NAME, forwarding any remaining flags to the agent
+pluto TEXT...                  ask; see Free text
+
+-l, --list                     list projects with their status line
+    --names                    one bare project name per line, for scripts and completion
+    --path NAME                print NAME's directory and exit
+    --create NAME [...]        register a project; see below
+    --edit NAME                open NAME's registry entry in $EDITOR
+    --remove NAME              delete NAME's registry entry, after confirming
+    --status                   git and mtime state of every registered project
+    --ask TEXT...              force TEXT to be a question, never a project name
+-h, --help                     full usage
+    --version
+```
+
+Reserved commands are only reserved in first position. Any other leading flag opens the
+picker and is forwarded, so `pluto --continue` picks a project and resumes its last
+session. Flags after a project name are never pluto's.
+
+There is no `pluto cd`, because a child process cannot change your shell's directory.
+Compose instead:
+
+```bash
+cd "$(pluto --path api-server)"
+```
+
+---
+
+## Free text
+
+Anything that is neither a reserved command nor a registered project is treated as a
+question. Pluto starts an interactive agent session seeded with it.
+
+Where it runs: the registered project your current directory is inside, or the vault if
+you are outside all of them. When projects are nested, the longest matching path wins.
+It always prints which directory it chose.
+
+Two shapes deliberately stay project lookups and fail with `unknown project`:
+
+```
+pluto backup                 a single bare, name-shaped word
+pluto api-sevrer --continue  an unknown word carrying agent flags
+```
+
+Both are far likelier to be a typo than a question, and silently turning a typo into a
+prompt buries the message telling you the name is wrong. Use `--ask` to force either
+through. `--ask` is also the only way to drive free text without a terminal.
+
+One shell detail that is not cosmetic: zsh expands `?` and `*` before pluto is ever
+reached, so an unquoted question dies in the shell with `no matches found`. The installer
+adds `alias pluto='noglob pluto'` for zsh users, which fixes `?`, `*` and `[`. Apostrophes
+and `& | ; ( ) < >` still need quoting:
+
+```bash
+pluto "what's eating my disk?"
+```
+
+Bash needs no alias; it leaves unmatched globs alone.
+
+---
+
+## Adding projects and completion
+
+```bash
+pluto --create api-server --path ~/code/api-server --status "serves the API"
+pluto --create                                      # or answer three prompts
+```
+
+Flags make it scriptable; with `--path` given it needs no terminal at all. Creating a
+missing directory is never silent, so you are either asked or you passed `--mkdir`.
+
+A new project is a usable CLI argument immediately. `pluto api-server` resolves it, and
+TAB completion offers it on the next keystroke. Nothing is cached and nothing is
+regenerated, because the completions call `pluto --names`, which reads `projects/*.md` on
+every invocation.
+
+**The registry is your notes.** `pluto api-server` resolves through `path:` in the
+frontmatter of `projects/api-server.md`, a file you were going to write anyway:
+
+```markdown
+---
+name: api-server
+path: ~/code/api-server
+---
+
+## Status
+serves the API. Blocked on the auth migration.
+```
+
+The first non-empty line under `## Status` becomes the description in `pluto --list`.
+Everything else is free prose. There is no separate config file listing your projects, so
+the list cannot disagree with your notes.
+
+Completion for zsh and bash is installed into `completions/` and wired into your rc file.
+On a shell that has never run `compinit`, the installer bootstraps it; on a configured
+shell it stays out of the way.
+
+---
+
+## Agents
+
+**Claude Code** gets everything: session-start injection, the prompt counter, the
+compaction nudge, `/log`, `/pref`, the launcher, and the MCP server.
+
+**Every other agent** reaches the vault through MCP: `search_memory`, `write_note`,
+`append_daily`, `reindex`. This is a real integration, but it is not the same one. Nothing
+is injected automatically; you have to ask. Since MCP lives in the semantic tier, that
+tier is not optional for these agents, and the installer says so rather than leaving them
+with a directory of markdown and no way in.
+
+The installer merges the server into Cursor's config, preserving any servers already
+there. For Codex and anything else it writes the stdio command to
+`.pluto/mcp-stdio-command.txt` instead of guessing at a config schema that moves.
+
+---
+
+## Semantic search
+
+Chunks every markdown file in the vault, embeds each chunk with a local Ollama model, and
+stores the vectors in sqlite-vec. Nothing leaves the machine.
+
+- Model: `nomic-embed-text-v2-moe`, 768 dimensions, cosine distance
+- Chunking: 1000 characters with 150 of overlap; the model caps at 512 tokens, so this
+  leaves headroom
+- Storage: `.pluto/index.db`, gitignored
+- Incremental: chunks are keyed by SHA, so reindexing only embeds what changed and drops
+  chunks whose source text is gone
+
+The index refuses to run against a schema built by a different model or metric rather than
+silently returning nonsense, because vectors from different models are not comparable.
+
+Ollama does not have to be on the same machine:
+
+```bash
+PLUTO_OLLAMA_URL=http://gpu-box.local:11434 ./install.sh --semantic
+```
+
+Rebuild the index by hand at any time:
+
+```bash
+~/pluto/.venv/bin/python ~/pluto/.claude/scripts/pluto_index.py
+```
+
+---
+
+## Hooks
+
+Four hooks, no model calls, zero background token spend.
+
+| Hook | What it does |
+|---|---|
+| SessionStart | injects `context.md`, `rules.md`, and the tail of the most recent daily log |
+| UserPromptSubmit | every 20 prompts, reminds you the session is worth logging |
+| PreCompact | says to write anything durable down now, before the detail is compacted away |
+| SessionEnd | appends a factual stub: clock time and prompt count. No invented summary. |
+
+The obvious missing feature is a hook that summarises each session. It is deliberately
+absent. A background summariser spends tokens on every session forever and produces text
+whose only reader is a future summariser, while making the log look maintained. `/log` is
+manual, and a model that was actually in the conversation writes it.
+
+---
+
+## Upgrading: code versus content
+
+Re-run `install.sh`. It knows which files are yours.
+
+**Code** is always brought up to date: `bin/`, `.claude/hooks/`, `.claude/scripts/`,
+`completions/`, `settings.json`. A stale hook is a bug, not a preference. If your copy
+differs, the previous version is saved next to it as `.bak` first.
+
+**Content** is created once and then never touched: `context.md`, `rules.md`,
+`preferences.md`, `projects/`, `notes/`, `daily/`. Not rewritten, not diffed, not backed
+up, because there is nothing to compare against. The moment the file exists it is yours.
+
+Everything that writes outside the vault is behind a single flag, which is what makes the
+installer testable against throwaway vaults without reaching into a real environment.
+
+---
+
+## Shell integration
+
+The installer writes two blocks, into two files, because they answer different questions.
+
+Environment goes where **every** shell reads it, `~/.zshenv` for zsh or `~/.profile`
+otherwise:
+
+```zsh
+export PLUTO_HOME="$HOME/pluto"
+case ":$PATH:" in *":$HOME/pluto/bin:"*) ;; *) export PATH="$HOME/pluto/bin:$PATH" ;; esac
+```
+
+zsh reads `.zshrc` only for interactive shells. Environment placed there leaves `pluto`
+missing from scripts, from `ssh host 'pluto --names'`, and from CI. The `PATH` line is
+append-guarded so repeated sourcing cannot stack duplicates.
+
+Interactive-only pieces go in `~/.zshrc` or `~/.bashrc`, since an alias and a completion
+mean nothing without a keyboard:
+
+```zsh
+alias pluto='noglob pluto'
+(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u }
+[ -f "$PLUTO_HOME/completions/pluto.zsh" ] && source "$PLUTO_HOME/completions/pluto.zsh"
+```
+
+Both blocks are delimited by markers, so re-running never duplicates them, and
+`--no-shell` skips the whole thing and prints the lines for you to add by hand.
+
+---
+
+## Sync and backup
+
+Sync is a private git remote. Git gives real merge semantics; a file-sync daemon over a
+git repo gives you `file (1).md` and a broken index. Do not put this vault in a folder
+managed by Dropbox, iCloud Drive or Google Drive.
+
+Backup is separate and encrypted. `backup.sh` bundles the whole repo with
+`git bundle --all`, encrypts it with `age -p`, and copies it to a cloud folder. The
+installer detects what is actually mounted under `~/Library/CloudStorage` and lets you
+pick, rather than hardcoding a provider.
+
+A cloud mount can hang rather than fail, so the script probes it under a timeout and bails
+loudly instead of piping a bundle into a wedged filesystem.
+
+---
+
+## Configuration reference
+
+Environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `PLUTO_HOME` | vault location. Defaults to `~/pluto`. Every script falls back to that default, because hooks also run in shells that never read your rc files. |
+| `PLUTO_OLLAMA_URL` | where Ollama lives. Defaults to `http://localhost:11434`. |
+| `PLUTO_BACKUP_DIR` | overrides the backup target chosen at install time. |
+| `PLUTO_DRY_RUN` | makes the launcher print its target instead of starting an agent. Used by the test suite. |
+
+Installer flags:
+
+| Flag | Effect |
+|---|---|
+| `--vault PATH` | where to build the vault |
+| `--agent NAME` | `claude-code`, `cursor`, `codex`, `other`, `none` |
+| `--semantic` / `--no-semantic` | decide the semantic tier without being asked |
+| `--cloud` / `--no-cloud` | decide sync and backup without being asked |
+| `--no-shell` | do not touch any rc file; print the lines instead |
+| `--no-global` | write nothing outside the vault |
+| `-y`, `--yes` | take the default for every prompt |
+| `-n`, `--dry-run` | print every action, write nothing |
+
+---
+
+## Platform support
+
+macOS is the primary target. Linux works: the launcher, hooks, registry, completion,
+semantic tier and MCP server were all exercised on Debian, and the tools that differ
+between BSD and GNU are probed at runtime rather than assumed.
+
+`backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
+
+Verified end to end on both:
+
+- a clean-room install into an isolated `HOME` on macOS, every tier
+- a `git clone` and install on a Debian container that had never seen pluto, with the
+  embedding model served from another host
+
+The installer finishes with a verify phase of 15 checks, including a JSON-RPC round-trip
+against the MCP server. That phase has caught real bugs, which is the only reason to have
+one.
+
+---
+
+## Troubleshooting
+
+**`pluto: command not found` in a script or over ssh.** The environment block belongs in
+`~/.zshenv`, not `~/.zshrc`. Re-run the installer, or move the two lines yourself.
+
+**`zsh: no matches found: safely?`** The `noglob` alias is missing. It is added to your
+interactive rc by the installer; open a new shell, or add
+`alias pluto='noglob pluto'` yourself.
+
+**TAB completion does nothing.** Completion needs `compinit` to have run before
+`completions/pluto.zsh` is sourced. The installer's block handles both cases; if you added
+the lines by hand, check the order. `echo $_comps[pluto]` should print `_pluto`.
+
+**`unknown project` for something you meant as a question.** A single bare word, or an
+unknown word followed by flags, is read as a project name on purpose. Use
+`pluto --ask ...`.
+
+**`ollama embedding failed`.** The URL in the message is where it looked. Start Ollama, or
+set `PLUTO_OLLAMA_URL`.
+
+**`index schema mismatch`.** The index was built with a different model or distance
+metric. Delete `.pluto/index.db` and reindex; mixing them returns confident nonsense.
+
+**`sqlite-vec` will not import.** Your `python3` cannot load sqlite extensions. Install one
+that can, for example `brew install python@3.13`, and re-run with `--semantic`.
+
+---
 
 ## Non-goals
 
-- **No LLM calls in hooks.** A summarizer hook that runs in the background spends tokens
-  forever to produce text nobody reads. `/log` is manual and that is the point.
-- **No cloud sync of the vault itself.** A file-sync daemon over a git repo gives you
-  `file (1).md` and a broken index. Use a private git remote.
-- **No web UI, no server, no daemon.** It is files and four shell scripts.
+- **No model calls in hooks.** The system spends zero tokens in the background.
+- **No cloud sync of the vault itself.** Use a private git remote.
+- **No web UI, no server, no daemon.** It is files, a few shell scripts and three small
+  python ones.
+- **Not a framework.** There is no plugin system and no configuration language. The
+  configuration is the markdown.
+
+---
+
+## Further reading
+
+[docs/DESIGN.md](docs/DESIGN.md) explains why it is built this way, including the
+decisions that went the other way first.
 
 ## License
 
