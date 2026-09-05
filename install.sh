@@ -139,6 +139,93 @@ put_content() { # TEMPLATE_REL DST_REL
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ---------------------------------------------------------------------------- platform
+#
+# One detection, one place. Everything that installs something asks these rather than
+# guessing at brew, which is how the Linux path came to be missing entirely.
+
+OS=""        # macos | linux | other
+PKG=""       # brew | apt | dnf | pacman | zypper | none
+PKG_LABEL=""
+
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) OS=macos ;;
+    Linux)  OS=linux ;;
+    *)      OS=other ;;
+  esac
+  if have brew;       then PKG=brew;   PKG_LABEL="Homebrew"
+  elif have apt-get;  then PKG=apt;    PKG_LABEL="apt"
+  elif have dnf;      then PKG=dnf;    PKG_LABEL="dnf"
+  elif have pacman;   then PKG=pacman; PKG_LABEL="pacman"
+  elif have zypper;   then PKG=zypper; PKG_LABEL="zypper"
+  else                     PKG=none;   PKG_LABEL="none"
+  fi
+}
+
+# Generic name -> the package that actually provides it here. bash 3.2, so: case, not a map.
+pkg_for() { # GENERIC
+  local py
+  case "$1:$PKG" in
+    venv:apt)     py="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 3)"
+                  printf 'python%s-venv\n' "$py" ;;
+    venv:dnf)     printf 'python3\n' ;;
+    venv:pacman)  printf 'python\n' ;;
+    venv:zypper)  printf 'python3\n' ;;
+    venv:brew)    printf 'python@3.13\n' ;;
+    timeout:*)    printf 'coreutils\n' ;;
+    *)            printf '%s\n' "$1" ;;   # age, fzf: same name everywhere
+  esac
+}
+
+pkg_install_cmd() { # PACKAGE -> the command a human would type
+  case "$PKG" in
+    brew)   printf 'brew install %s\n' "$1" ;;
+    apt)    printf 'sudo apt install -y %s\n' "$1" ;;
+    dnf)    printf 'sudo dnf install -y %s\n' "$1" ;;
+    pacman) printf 'sudo pacman -S --needed %s\n' "$1" ;;
+    zypper) printf 'sudo zypper install -y %s\n' "$1" ;;
+    *)      printf '\n' ;;
+  esac
+}
+
+# ensure_tool BINARY GENERIC DEFAULT WHY -> 0 if present or installed
+ensure_tool() {
+  local bin="$1" generic="$2" def="${3:-y}" why="${4:-}" pkg cmd
+  have "$bin" && return 0
+  pkg="$(pkg_for "$generic")"
+  cmd="$(pkg_install_cmd "$pkg")"
+  [ -n "$why" ] && warn "$why"
+  if [ -z "$cmd" ]; then
+    warn "'$bin' is missing and there is no package manager here to install it with"
+    return 1
+  fi
+  info "  $cmd"
+  if [ -n "$DRY_RUN" ]; then dim "would run it"; return 1; fi
+  confirm "install it now?" "$def" || return 1
+  sh -c "$cmd" || { warn "that failed — run it yourself and re-run this installer"; return 1; }
+  have "$bin"
+}
+
+# macOS without Homebrew can install almost none of the optional pieces. Say so once, and
+# offer the documented remedy rather than repeating "brew install ..." at a machine with
+# no brew on it.
+offer_homebrew() {
+  [ "$OS" = macos ] || return 1
+  have brew && return 0
+  warn "Homebrew is not installed, and it is how macOS gets age, coreutils, fzf and ollama"
+  info "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/brew/HEAD/install.sh)\""
+  [ -n "$DRY_RUN" ] && return 1
+  confirm "install Homebrew now? (fetches and runs a script from the network)" n || return 1
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/brew/HEAD/install.sh)" || return 1
+  # A fresh install is not on PATH in this shell yet.
+  for c in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$c" ] && eval "$("$c" shellenv)" && break
+  done
+  detect_platform
+  have brew
+}
+
 # python3 must be able to load sqlite extensions or sqlite-vec cannot work. macOS system
 # python3 is frequently built without it, and the failure surfaces hundreds of megabytes
 # later as an import error — so this is checked before anything is downloaded.
@@ -181,15 +268,10 @@ pick_python() {
 }
 
 # The exact command for this machine, not a generic "install the venv package".
-venv_fix_hint() { # PYTHON
-  local v
-  v="$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 3)"
-  if have apt-get;   then printf 'sudo apt install -y python%s-venv\n' "$v"
-  elif have dnf;     then printf 'sudo dnf install -y python3\n'
-  elif have pacman;  then printf 'sudo pacman -S --needed python\n'
-  elif have brew;    then printf 'brew install python@%s\n' "$v"
-  else                    printf 'install the venv/ensurepip module for %s\n' "$1"
-  fi
+venv_fix_hint() { # PYTHON (unused; kept for symmetry with the platform helpers)
+  local cmd
+  cmd="$(pkg_install_cmd "$(pkg_for venv)")"
+  [ -n "$cmd" ] && printf '%s\n' "$cmd" || printf 'install the venv/ensurepip module\n'
 }
 
 want() { # TIER_VAR PROMPT DEFAULT
@@ -208,11 +290,18 @@ phase_preflight() {
   info "source: $(rel "$SRC")"
   [ -n "$DRY_RUN" ] && warn "dry run — nothing will be written"
 
-  case "$(uname -s)" in
-    Darwin) ok "macOS" ;;
-    Linux)  warn "Linux — the core works; backup.sh and the brew paths assume macOS" ;;
-    *)      die "unsupported platform: $(uname -s)" ;;
+  detect_platform
+  case "$OS" in
+    macos) ok "macOS ($(uname -m))" ;;
+    linux) ok "Linux ($(uname -m)) — backup.sh is macOS-only; everything else works here" ;;
+    other) warn "$(uname -s) is untested; the core is portable shell and will probably work" ;;
   esac
+  if [ "$PKG" = none ]; then
+    warn "no supported package manager found — optional extras must be installed by hand"
+    [ "$OS" = macos ] && offer_homebrew || true
+  else
+    ok "package manager: $PKG_LABEL"
+  fi
 
   have git     || die "git is required"
   have python3 || die "python3 is required (the hooks use it to escape JSON)"
@@ -336,7 +425,7 @@ phase_semantic() {
       warn "python3 is here but cannot create a virtualenv (ensurepip is missing)"
       info "Debian and Ubuntu split that into its own package. Fix with:"
       info "  $fix"
-      if [ -z "$DRY_RUN" ] && have sudo && confirm "run that now?" n; then
+      if [ -z "$DRY_RUN" ] && { [ "$PKG" = brew ] || have sudo; } && confirm "run that now?" y; then
         if sh -c "$fix"; then
           if pick_python; then py="$PY_CHOSEN"; fi
         else
@@ -345,7 +434,14 @@ phase_semantic() {
       fi
     else
       warn "no python3 here can load sqlite extensions, which sqlite-vec needs"
-      info "fix:  brew install python@3.13   (or any python3 built with extension support)"
+      local pycmd
+      pycmd="$(pkg_install_cmd "$(pkg_for venv)")"
+      if [ -n "$pycmd" ]; then
+        info "install a python3 that has them:"
+        info "  $pycmd"
+      else
+        info "install a python3 built with loadable sqlite extension support"
+      fi
     fi
   fi
   if [ -z "$py" ]; then
@@ -478,25 +574,32 @@ choose_agent() {
 # shell, which is a different proposition, so that one defaults to no and prints the
 # command either way.
 install_ollama() {
-  if have brew; then
-    confirm "ollama is not installed. install it with brew?" y || return 1
-    brew install ollama
-    return 0
-  fi
-  case "$(uname -s)" in
-    Linux)
+  case "$OS" in
+    macos)
+      if ! have brew; then
+        offer_homebrew || {
+          info "or install Ollama directly: https://ollama.com/download"
+          return 1
+        }
+      fi
+      confirm "ollama is not installed. install it with brew?" y || return 1
+      brew install ollama || return 1
+      ;;
+    linux)
+      # Ollama ships no apt/dnf package; the documented path is this script. It is a
+      # network script piped into a shell, so it defaults to no and is printed either way.
       info "Ollama's documented Linux install is a script fetched from the network:"
       dim "  curl -fsSL https://ollama.com/install.sh | sh"
       confirm "run that now?" n || return 1
-      have curl || die "curl is required to install ollama"
+      have curl || { warn "curl is required to install ollama that way"; return 1; }
       curl -fsSL https://ollama.com/install.sh | sh || return 1
-      return 0
       ;;
     *)
       info "install ollama from https://ollama.com/download, then re-run with --semantic"
       return 1
       ;;
   esac
+  have ollama
 }
 
 phase_agent() {
@@ -705,6 +808,13 @@ phase_shell() {
     append_block "$inter_file" "# >>> pluto (interactive) >>>" completion emit_interactive_block "$is_zsh"
   fi
   info "open a new shell to pick it up"
+
+  # Optional, and the launcher degrades to a numbered menu without it, so this one is a no
+  # by default rather than something installed on your behalf.
+  if ! have fzf; then
+    info "fzf turns bare 'pluto' into a fuzzy picker; without it you get a numbered menu"
+    ensure_tool fzf fzf n || true
+  fi
 }
 
 print_shell_block() { # IS_ZSH
@@ -769,22 +879,14 @@ phase_cloud() {
   BACKUP_LABEL="$(basename "$choice" | sed 's/-.*//')"
   put_code dot-claude/scripts/backup.sh .claude/scripts/backup.sh 755
   ok "backup.sh -> $(rel "$BACKUP_DIR")"
-  if ! have age; then
-    local cmd=""
-    if have brew;        then cmd="brew install age"
-    elif have apt-get;   then cmd="sudo apt install -y age"
-    elif have dnf;       then cmd="sudo dnf install -y age"
-    elif have pacman;    then cmd="sudo pacman -S --needed age"
-    fi
-    if [ -n "$cmd" ]; then
-      warn "age is not installed; backup.sh needs it to encrypt"
-      info "  $cmd"
-      if confirm "install it now?" y; then sh -c "$cmd" || warn "that failed — run it yourself"; fi
+  ensure_tool age age y "backup.sh needs age to encrypt the bundle before it leaves the machine" || true
+  if ! have gtimeout && ! have timeout; then
+    if [ "$OS" = macos ]; then
+      ensure_tool gtimeout timeout y "backup.sh probes the cloud mount under a timeout" || true
     else
-      warn "age is not installed — see https://github.com/FiloSottile/age"
+      ensure_tool timeout timeout y "backup.sh probes the cloud mount under a timeout" || true
     fi
   fi
-  have gtimeout || have timeout || warn "no timeout(1) — install coreutils"
 }
 
 phase_verify() {
