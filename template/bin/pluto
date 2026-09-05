@@ -1,0 +1,499 @@
+#!/bin/bash
+# pluto — open a project with claude, and manage the registry that lists them.
+#
+# Deliberately dumb on the launch path: no model call, no network, no reasoning about
+# what you "should" work on. `pluto api-server` is a cd and an exec. A picker that
+# reasons about your priorities costs latency on every launch to tell you the thing
+# you already opened the terminal to do.
+#
+# The registry is $PLUTO/projects/*.md — `path:` in each file's frontmatter. The vault
+# is the single source of truth; no paths are hardcoded here.
+#
+# Targets bash 3.2 (what macOS ships): no mapfile, no associative arrays, no ${v^^}.
+#
+# PLUTO_DRY_RUN=1 makes launch() print where it would go instead of exec'ing claude.
+# Undocumented in --help on purpose: it exists so the dispatch rules can be tested
+# without spawning an interactive session.
+
+set -euo pipefail
+
+PLUTO="${PLUTO_HOME:-$HOME/pluto}"
+PLUTO_VERSION="1.0.0"
+
+# registry() — emits name<TAB>path<TAB>status. Shared with .claude/scripts/refresh_active.sh
+# so the launcher and the status script can never disagree about what exists.
+. "$PLUTO/bin/_pluto_registry.sh"
+
+# ---------------------------------------------------------------------------- helpers
+
+die() { # MSG [EXIT_CODE]
+  echo "pluto: $1" >&2
+  exit "${2:-1}"
+}
+
+# Every command that takes a project name validates it the same way.
+need_name() { # ARG_VALUE FLAG
+  [ -n "${1:-}" ] || die "$2 needs a project name (try: pluto --list)" 2
+}
+
+# --create/--edit/--remove prompt or open an editor. Refuse rather than half-run
+# when there is nobody to answer.
+need_tty() { # FLAG
+  [ -t 0 ] || die "$1 is interactive and stdin is not a terminal" 2
+}
+
+# Registry lookup. Deliberately no `exit` in the awk: exiting early closes the pipe
+# while registry() is still writing, registry dies of SIGPIPE, and pipefail + set -e
+# kill the script. That bug already shipped once — it only bit projects that were not
+# last alphabetically, which is exactly why it survived a first round of testing.
+resolve() { # NAME -> path on stdout, empty if unknown
+  registry | awk -F'\t' -v n="$1" '$1==n && !seen {print $2; seen=1}'
+}
+
+known_names() {
+  registry | cut -f1 | sed 's/^/  /'
+}
+
+resolve_or_die() { # NAME -> path
+  local p
+  p="$(resolve "$1")"
+  [ -n "$p" ] || unknown_project "$1"
+  printf '%s\n' "$p"
+}
+
+registry_file() { # NAME -> $PLUTO/projects/NAME.md
+  printf '%s\n' "$PLUTO/projects/$1.md"
+}
+
+# Store paths under $HOME as ~/... so the registry stays portable, matching the
+# existing entries. The tilde here is a LITERAL being written into a file, not a
+# path being expanded — that is the whole point of the function.
+# shellcheck disable=SC2088
+tildify() { # ABS_PATH
+  case "$1" in
+    "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
+    "$HOME")   printf '~\n' ;;
+    *)         printf '%s\n' "$1" ;;
+  esac
+}
+
+expand_tilde() { # PATH
+  printf '%s\n' "${1/#\~/$HOME}"
+}
+
+confirm() { # PROMPT -> 0 if yes
+  local reply
+  read -r -p "$1 [y/N] " reply
+  case "$reply" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+
+# Everything after the first non-flag token is ONE question, not a list of claude
+# arguments — `claude "why does x fail"` seeds a session, `claude why does x fail`
+# is four positionals.
+join_args() { # WORD...
+  local IFS=' '
+  printf '%s\n' "$*"
+}
+
+# A project name is also a filename and the key you type at the picker; --create
+# enforces this charset when writing an entry, so the dispatcher reuses it to decide
+# whether an unknown bare word was a mistyped project or the start of a question.
+name_shaped() { # WORD
+  case "$1" in
+    ''|.|..)           return 1 ;;
+    *[!A-Za-z0-9._-]*) return 1 ;;
+    *)                 return 0 ;;
+  esac
+}
+
+has_flag() { # ARG...
+  local a
+  for a in "$@"; do
+    [ "${a#-}" = "$a" ] || return 0
+  done
+  return 1
+}
+
+unknown_project() { # NAME — reports and exits
+  { echo "pluto: unknown project '$1'"; echo "known:"; known_names; } >&2
+  exit 1
+}
+
+# Where a free-text question runs: the registered project you are standing in, else
+# the vault. Longest match wins, so a project nested inside another resolves to the
+# inner one. Both sides go through `pwd -P` — a symlinked cwd must still match the
+# entry it belongs to.
+ask_dir() { # -> DIR on stdout
+  local cwd name dir status real best="" bestlen=0
+  cwd="$(pwd -P)"
+  while IFS=$'\t' read -r name dir status; do
+    [ -d "$dir" ] || continue
+    real="$(cd "$dir" 2>/dev/null && pwd -P)" || continue
+    case "$cwd" in
+      "$real"|"$real"/*)
+        # A bare `[ ... ] && best=...` returns non-zero on the losing branch and set -e
+        # kills the script mid-loop. Same class of trap as the awk above resolve().
+        if [ "${#real}" -gt "$bestlen" ]; then
+          best="$real"
+          bestlen="${#real}"
+        fi
+        ;;
+    esac
+  done < <(registry)
+  printf '%s\n' "${best:-$PLUTO}"
+}
+
+# Free text always announces where it landed. cwd-aware routing is the one piece of
+# magic in this script; it should never be silent about the directory it chose.
+ask_launch() { # PROMPT
+  local dir
+  dir="$(ask_dir)"
+  echo "pluto: asking in $(tildify "$dir")" >&2
+  launch "$dir" "$1"
+}
+
+launch() { # DIR [claude args...]
+  local dir="$1"; shift
+  [ -d "$dir" ] || die "missing directory: $dir"
+  if [ -n "${PLUTO_DRY_RUN:-}" ]; then
+    printf 'dir: %s\n' "$dir"
+    if [ $# -gt 0 ]; then
+      printf 'arg: %s\n' "$@"
+    fi
+    exit 0
+  fi
+  cd "$dir" && exec claude "$@"
+}
+
+# --------------------------------------------------------------------------- commands
+
+cmd_help() {
+  cat <<EOF
+pluto — open a project with claude, ask it anything, and manage the registry.
+
+USAGE
+  pluto                        pick a project interactively
+  pluto NAME [claude args...]  open NAME, forwarding remaining args to claude
+  pluto TEXT...                ask claude TEXT, here or in the vault (see FREE TEXT)
+
+COMMANDS
+  -l, --list                   list registered projects
+      --path NAME              print NAME's directory and exit
+      --create NAME [...]      register a new project (see NEW PROJECTS)
+      --names                  one project name per line, for scripts and completion
+      --edit NAME              open NAME's registry entry in \$EDITOR
+      --remove NAME            delete NAME's registry entry (asks first)
+      --status                 git / mtime state of every registered project
+      --ask TEXT...            force TEXT to be a question, never a project name
+  -h, --help                   this text
+      --version
+
+FREE TEXT
+  Anything that is neither a command nor a registered project is a question. It opens
+  an interactive claude session seeded with what you typed:
+
+      pluto how can I clean my mac safely?
+      pluto api-server why does the divergence test fail
+
+  With no project name it runs in the project you are standing in, or in the vault
+  ($PLUTO) when you are outside one. It prints which.
+
+  Two shapes stay project lookups, because a typo is likelier than a question there:
+
+      pluto backup                 one bare word that could be a name
+      pluto api-sevrer --continue   unknown word carrying claude flags
+
+  Use --ask to force either through.
+
+  Your shell splits the words before pluto sees them. With
+
+      alias pluto='noglob pluto'
+
+  in ~/.zshrc, ? and * survive unquoted. Apostrophes and & | ; ( ) < > still do not:
+
+      pluto "what's eating my disk?"
+
+FLAGS
+  The commands above are reserved by pluto and only in FIRST position. Any other
+  flag opens the picker and is forwarded to claude, so this still works:
+
+      pluto --continue         pick a project, then resume its last session
+
+  Flags after a project name are never pluto's:
+
+      pluto api-server --help   runs 'claude --help' inside api-server
+
+NEW PROJECTS
+  pluto --create NAME [--path DIR] [--status TEXT] [--mkdir]
+
+  Anything not given is prompted for, so plain 'pluto --create' still works. Pass --path
+  to run without a terminal; --mkdir allows creating the directory, which is never silent.
+
+  A new project is a usable CLI argument immediately — 'pluto NAME' resolves it and shell
+  completion offers it on the next TAB. Nothing is cached and nothing is regenerated,
+  because the registry IS projects/*.md, read on every invocation.
+
+COMPLETION
+  Completion for zsh and bash ships in $PLUTO/completions. The installer's shell block
+  sources the right one; both read --names, so they never go stale.
+
+REGISTRY
+  $PLUTO/projects/*.md — one file per project, 'path:' in its frontmatter.
+  Edit them directly or use --create / --edit / --remove.
+
+CHANGING DIRECTORY
+  A child process cannot cd your shell, so there is no 'pluto cd'. Compose instead:
+
+      cd "\$(pluto --path api-server)"
+
+  For a one-word version, add a function to ~/.zshrc yourself:
+
+      pcd() { cd "\$(pluto --path "\$1")" || return; }
+EOF
+}
+
+cmd_ask() { # WORD...
+  [ $# -gt 0 ] || die "--ask needs something to ask" 2
+  ask_launch "$(join_args "$@")"
+}
+
+cmd_version() {
+  echo "pluto $PLUTO_VERSION"
+}
+
+# One bare name per line. --list is for humans (columns, status, MISSING markers); this is
+# what scripts and shell completion read, so a new project is a completable argument the
+# moment its file exists — there is nothing to regenerate.
+cmd_names() {
+  registry | cut -f1
+}
+
+cmd_list() {
+  local rows width
+  rows="$(registry)"
+  [ -n "$rows" ] || die "no entries with a 'path:' in $PLUTO/projects/*.md"
+
+  # Column width from the longest name, so the status column lines up.
+  width="$(printf '%s\n' "$rows" | cut -f1 | awk '{ if (length($0) > m) m = length($0) } END { print m }')"
+
+  printf '%s\n' "$rows" | while IFS=$'\t' read -r name dir status; do
+    if [ -d "$dir" ]; then
+      printf '  %-*s  %s\n' "$width" "$name" "$status"
+    else
+      # A registry entry pointing nowhere is almost always a typo or a moved
+      # directory; say so here rather than at launch time.
+      printf '  %-*s  %s  [MISSING: %s]\n' "$width" "$name" "$status" "$(tildify "$dir")"
+    fi
+  done
+}
+
+cmd_path() { # NAME
+  need_name "${1:-}" "--path"
+  resolve_or_die "$1"
+}
+
+cmd_status() {
+  local script="$PLUTO/.claude/scripts/refresh_active.sh"
+  [ -x "$script" ] || die "missing or not executable: $script"
+  "$script"
+}
+
+cmd_edit() { # NAME
+  need_name "${1:-}" "--edit"
+  local f
+  f="$(registry_file "$1")"
+  [ -f "$f" ] || unknown_project "$1"
+  # TTY check comes after the argument checks: a bad name should be reported as a bad
+  # name, not as "no terminal".
+  need_tty "--edit"
+  # EDITOR is commonly unset; vi is always present on macOS.
+  exec "${VISUAL:-${EDITOR:-vi}}" "$f"
+}
+
+cmd_remove() { # NAME
+  need_name "${1:-}" "--remove"
+  local f
+  f="$(registry_file "$1")"
+  [ -f "$f" ] || die "unknown project '$1'"
+  need_tty "--remove"
+
+  echo "This removes the registry entry '$1' only:"
+  echo "  delete  $(tildify "$f")"
+  echo "  keep    $(tildify "$(resolve "$1")")  <- the project directory is NOT touched"
+  confirm "Remove?" || { echo "cancelled"; exit 0; }
+
+  # Only promise recoverability when it is true — an entry created since the last
+  # commit is untracked, and `git checkout` would not bring it back.
+  local tracked=no
+  git -C "$PLUTO" ls-files --error-unmatch "projects/$1.md" >/dev/null 2>&1 && tracked=yes
+
+  rm -f "$f"
+  echo "removed $(tildify "$f")"
+  if [ "$tracked" = yes ]; then
+    echo "it was committed, so 'git -C $(tildify "$PLUTO") checkout -- projects/$1.md' brings it back"
+  else
+    echo "it was never committed, so this is not recoverable from git"
+  fi
+}
+
+cmd_create() { # [NAME] [--path DIR] [--status TEXT] [--mkdir]
+  local name="" dir="" status="" mkdir_ok="" dir_expanded f
+
+  # Flags make this scriptable. Without them every field is prompted for, which is fine at
+  # a terminal and useless from a setup script or a test.
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path)   shift; [ $# -gt 0 ] || die "--path needs a directory" 2; dir="$1" ;;
+      --status) shift; [ $# -gt 0 ] || die "--status needs text" 2; status="$1" ;;
+      --mkdir)  mkdir_ok=1 ;;
+      -*)       die "unknown option for --create: '$1'" 2 ;;
+      *)        if [ -z "$name" ]; then name="$1"; else die "--create takes one name, got '$1'" 2; fi ;;
+    esac
+    shift
+  done
+
+  # Validate anything supplied as an argument BEFORE requiring a terminal — a bad
+  # name is a bad name whether or not anyone is there to be prompted.
+  if [ -z "$name" ]; then
+    need_tty "--create"
+    read -r -p "name: " name
+  fi
+  [ -n "$name" ] || die "no name given"
+
+  # The name becomes a filename and the key you type at the picker, so reject
+  # anything that would be mangled rather than silently rewriting it.
+  name_shaped "$name" || die "invalid name '$name' — use letters, digits, dot, dash, underscore" 2
+
+  f="$(registry_file "$name")"
+  if [ -f "$f" ]; then
+    die "'$name' is already registered — use 'pluto --edit $name' to change it"
+  fi
+
+  if [ -z "$dir" ]; then
+    need_tty "--create"
+    read -r -p "directory: " dir
+  fi
+  [ -n "$dir" ] || die "no directory given"
+  dir_expanded="$(expand_tilde "$dir")"
+
+  if [ ! -d "$dir_expanded" ]; then
+    # Creating a directory is not what you asked for, so it is never silent: at a terminal
+    # you are asked, and from a script you must have passed --mkdir.
+    if [ -n "$mkdir_ok" ]; then
+      mkdir -p "$dir_expanded"
+    elif [ -t 0 ]; then
+      echo "  $dir_expanded does not exist."
+      if confirm "  create it?"; then
+        mkdir -p "$dir_expanded"
+        echo "  created $dir_expanded"
+      else
+        die "aborted — directory does not exist"
+      fi
+    else
+      die "$dir_expanded does not exist (pass --mkdir to create it)"
+    fi
+  fi
+
+  # Normalise to an absolute path, then store ~-relative if it is under $HOME.
+  dir_expanded="$(cd "$dir_expanded" && pwd -P)"
+
+  if [ -z "$status" ] && [ -t 0 ]; then
+    read -r -p "status: " status
+  fi
+  [ -n "$status" ] || status="(no status yet)"
+
+  cat > "$f" <<EOF
+---
+name: $name
+path: $(tildify "$dir_expanded")
+---
+
+## Status
+$status
+EOF
+
+  echo
+  echo "  wrote $(tildify "$f")"
+  echo "  pluto $name    to open it"
+  # No cache to invalidate and no completion list to regenerate: the registry is read from
+  # projects/*.md on every invocation, so the name is a valid CLI argument right now.
+}
+
+pick() { # -> selected registry row on stdout, empty if cancelled
+  local rows=() line names=() r choice
+  while IFS= read -r line; do rows+=("$line"); done < <(registry)
+  [ ${#rows[@]} -gt 0 ] || die "no entries with a 'path:' in $PLUTO/projects/*.md"
+
+  if command -v fzf >/dev/null 2>&1; then
+    # --tiebreak=begin,length: the status column is searchable too, so without this
+    # a query like "api" ranks a project whose *status line* mentions the API ahead of
+    # the project actually named api-server.
+    printf '%s\n' "${rows[@]}" \
+      | fzf --with-nth=1,3 --delimiter='\t' --prompt='pluto > ' \
+            --height=40% --reverse --tiebreak=begin,length || true
+  else
+    # bash 3.2 has no mapfile; build a parallel display array so the menu never
+    # shows raw tab-delimited rows.
+    for r in "${rows[@]}"; do
+      names+=("$(printf '%s' "$r" | cut -f1,3 | tr '\t' '\040')")
+    done
+    # The menu itself must not land on stdout — stdout is how pick() returns the
+    # chosen row to the caller. But `done ... >&2` redirects everything inside the
+    # loop, the result printf included, so the answer is carried out on fd 3.
+    exec 3>&1
+    PS3="pluto > "
+    select choice in "${names[@]}"; do
+      [ -n "${choice:-}" ] || continue
+      printf '%s\n' "${rows[$((REPLY - 1))]}" >&3
+      break
+    done < /dev/tty >&2
+    exec 3>&-
+  fi
+}
+
+# -------------------------------------------------------------------------- dispatch
+
+case "${1:-}" in
+  -h|--help)   cmd_help; exit 0 ;;
+  --version)   cmd_version; exit 0 ;;
+  -l|--list)   cmd_list; exit 0 ;;
+  --status)    cmd_status; exit 0 ;;
+  --path)      shift; cmd_path "${1:-}"; exit 0 ;;
+  --edit)      shift; cmd_edit "${1:-}" ;;
+  --remove)    shift; cmd_remove "${1:-}"; exit 0 ;;
+  --create)    shift; cmd_create "$@"; exit 0 ;;
+  --names)     cmd_names; exit 0 ;;
+  --ask)       shift; cmd_ask "$@" ;;
+esac
+
+# pluto NAME [claude args...] / pluto <free text> — a leading '-' means it is a flag
+# for claude, not a project name, so fall through to the picker and forward it.
+if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+  target="$(resolve "$1")"
+
+  if [ -n "$target" ]; then
+    shift
+    # Trailing words are a question; trailing flags are claude's own arguments.
+    # Deciding on the FIRST of them is what keeps `pluto api-server --continue` working.
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+      launch "$target" "$(join_args "$@")"
+    fi
+    launch "$target" "$@"
+  fi
+
+  # Not a registered project, so it is a question — except for the two shapes that are
+  # much more likely to be a mistyped name. Turning those into prompts would bury the
+  # error that tells you the name is wrong. --ask forces them through.
+  if [ $# -eq 1 ] && name_shaped "$1"; then
+    unknown_project "$1"
+  fi
+  if has_flag "$@"; then
+    unknown_project "$1"
+  fi
+
+  ask_launch "$(join_args "$@")"
+fi
+
+selected="$(pick)"
+[ -n "$selected" ] || exit 0
+launch "$(printf '%s' "$selected" | cut -f2)" "$@"

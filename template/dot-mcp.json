@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pluto": {
+      "command": "{{PY}}",
+      "args": ["{{VAULT}}/.claude/scripts/pluto_mcp.py"]
+    }
+  }
+}

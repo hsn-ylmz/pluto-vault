@@ -1,0 +1,12 @@
+.claude/settings.local.json
+.claude/hooks/.state/
+.pluto/index.db
+.pluto/index.db-*
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.obsidian/workspace*
+.obsidian/cache
+*.bak
+.env
