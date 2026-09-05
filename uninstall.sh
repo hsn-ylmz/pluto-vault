@@ -234,6 +234,7 @@ else
       pacman)       cmd="sudo pacman -Rs --noconfirm $name" ;;
       zypper)       cmd="sudo zypper remove -y $name" ;;
       ollama-model) cmd="ollama rm $name" ;;
+      npm)          cmd="npm uninstall -g $name" ;;
       script)
         if [ "$name" = ollama ]; then
           info "ollama was installed by its own script; the documented removal is:"

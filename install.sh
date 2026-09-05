@@ -147,6 +147,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 OS=""        # macos | linux | other
 PKG=""       # brew | apt | dnf | pacman | zypper | none
 PKG_LABEL=""
+SUDO=""      # "sudo " when needed and available; empty as root
+CAN_ROOT=""  # whether a root-requiring install can run at all
 
 detect_platform() {
   case "$(uname -s)" in
@@ -154,6 +156,16 @@ detect_platform() {
     Linux)  OS=linux ;;
     *)      OS=other ;;
   esac
+  # Root needs no sudo, and minimal container images ship without the binary entirely.
+  # Gating installs on `have sudo` silently disabled every prompt for the root user.
+  if [ "$(id -u)" = 0 ]; then
+    SUDO=""; CAN_ROOT=1
+  elif have sudo; then
+    SUDO="sudo "; CAN_ROOT=1
+  else
+    SUDO=""; CAN_ROOT=""
+  fi
+
   if have brew;       then PKG=brew;   PKG_LABEL="Homebrew"
   elif have apt-get;  then PKG=apt;    PKG_LABEL="apt"
   elif have dnf;      then PKG=dnf;    PKG_LABEL="dnf"
@@ -174,19 +186,31 @@ pkg_for() { # GENERIC
     venv:zypper)  printf 'python3\n' ;;
     venv:brew)    printf 'python@3.13\n' ;;
     timeout:*)    printf 'coreutils\n' ;;
+    nodejs:brew)  printf 'node\n' ;;
+    nodejs:apt)   printf 'nodejs npm\n' ;;
+    nodejs:dnf)   printf 'nodejs npm\n' ;;
+    nodejs:pacman) printf 'nodejs npm\n' ;;
+    nodejs:zypper) printf 'nodejs npm\n' ;;
     *)            printf '%s\n' "$1" ;;   # age, fzf: same name everywhere
   esac
 }
 
-pkg_install_cmd() { # PACKAGE -> the command a human would type
+pkg_install_cmd() { # PACKAGE -> the command a human would type here
   case "$PKG" in
     brew)   printf 'brew install %s\n' "$1" ;;
-    apt)    printf 'sudo apt install -y %s\n' "$1" ;;
-    dnf)    printf 'sudo dnf install -y %s\n' "$1" ;;
-    pacman) printf 'sudo pacman -S --needed %s\n' "$1" ;;
-    zypper) printf 'sudo zypper install -y %s\n' "$1" ;;
+    apt)    printf '%sapt install -y %s\n' "$SUDO" "$1" ;;
+    dnf)    printf '%sdnf install -y %s\n' "$SUDO" "$1" ;;
+    pacman) printf '%spacman -S --needed %s\n' "$SUDO" "$1" ;;
+    zypper) printf '%szypper install -y %s\n' "$SUDO" "$1" ;;
     *)      printf '\n' ;;
   esac
+}
+
+# brew never needs root; everything else here does.
+pkg_can_install() {
+  [ "$PKG" = brew ] && return 0
+  [ "$PKG" = none ] && return 1
+  [ -n "$CAN_ROOT" ]
 }
 
 # What pluto installed, so the uninstaller can remove exactly that and nothing else.
@@ -211,6 +235,10 @@ ensure_tool() {
   fi
   info "  $cmd"
   if [ -n "$DRY_RUN" ]; then dim "would run it"; return 1; fi
+  if ! pkg_can_install; then
+    warn "that needs root, and neither sudo nor a root shell is available here"
+    return 1
+  fi
   confirm "install it now?" "$def" || return 1
   sh -c "$cmd" || { warn "that failed — run it yourself and re-run this installer"; return 1; }
   have "$bin" || return 1
@@ -310,8 +338,11 @@ phase_preflight() {
   if [ "$PKG" = none ]; then
     warn "no supported package manager found — optional extras must be installed by hand"
     [ "$OS" = macos ] && offer_homebrew || true
+  elif pkg_can_install; then
+    ok "package manager: $PKG_LABEL$([ "$(id -u)" = 0 ] && printf ' (running as root)')"
   else
     ok "package manager: $PKG_LABEL"
+    warn "not root and no sudo — anything needing a package install will be printed, not run"
   fi
 
   have git     || die "git is required"
@@ -436,7 +467,9 @@ phase_semantic() {
       warn "python3 is here but cannot create a virtualenv (ensurepip is missing)"
       info "Debian and Ubuntu split that into its own package. Fix with:"
       info "  $fix"
-      if [ -z "$DRY_RUN" ] && { [ "$PKG" = brew ] || have sudo; } && confirm "run that now?" y; then
+      if [ -z "$DRY_RUN" ] && ! pkg_can_install; then
+        warn "that needs root, and neither sudo nor a root shell is available here"
+      elif [ -z "$DRY_RUN" ] && confirm "run that now?" y; then
         if sh -c "$fix"; then
           record_installed "$PKG" "$(pkg_for venv)"
           if pick_python; then py="$PY_CHOSEN"; fi
@@ -571,15 +604,32 @@ choose_agent() {
 
   if have "$AGENT_CMD"; then
     ok "launcher will run: $AGENT_CMD ($(command -v "$AGENT_CMD"))"
-  else
-    warn "'$AGENT_CMD' is not on your PATH"
-    if [ "$AGENT_CMD" = claude ]; then
-      info "install Claude Code:  npm install -g @anthropic-ai/claude-code"
-      info "                      https://claude.com/claude-code"
-    fi
-    info "everything except starting a session still works: --list, --status, --create ..."
-    info "already have it under another name? export PLUTO_AGENT=<command>"
+    return 0
   fi
+
+  warn "'$AGENT_CMD' is not on your PATH"
+  if [ "$AGENT_CMD" = claude ] && install_claude_code; then
+    ok "launcher will run: claude ($(command -v claude))"
+    return 0
+  fi
+  [ "$AGENT_CMD" = claude ] && info "install it later: https://claude.com/claude-code"
+  info "everything except starting a session still works: --list, --status, --create ..."
+  info "already have it under another name? export PLUTO_AGENT=<command>"
+}
+
+# Offered rather than assumed: the agent is a separate program with its own login and its
+# own update channel, and plenty of people already have it somewhere pluto cannot see.
+install_claude_code() {
+  [ -n "$DRY_RUN" ] && return 1
+  if ! have npm; then
+    info "Claude Code installs through npm, which is not here either."
+    ensure_tool npm nodejs n "Node.js provides npm" || return 1
+  fi
+  info "  npm install -g @anthropic-ai/claude-code"
+  confirm "install Claude Code now?" y || return 1
+  npm install -g @anthropic-ai/claude-code || { warn "npm install failed"; return 1; }
+  have claude || return 1
+  record_installed npm @anthropic-ai/claude-code
 }
 
 # Package managers differ, and so does what counts as consent. brew and apt verify what
