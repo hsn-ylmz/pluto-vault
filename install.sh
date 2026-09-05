@@ -566,22 +566,54 @@ PY
   fi
 }
 
-# Two blocks, in two files, because they answer two different questions.
+# Which file a line goes in is not cosmetic; it decides whether `pluto` exists at all.
 #
-# PLUTO_HOME and PATH belong everywhere a shell runs — scripts, `ssh host pluto --names`,
-# CI, a container's `zsh -lc`. zsh reads .zshrc ONLY for interactive shells, so env vars
-# placed there leave `pluto` missing from every non-interactive invocation. .zshenv is read
-# by every zsh there is.
+#   zsh   .zshenv  every zsh, including scripts and ssh          <- env belongs here
+#         .zshrc   interactive only                              <- alias, completion
+#   bash  .profile login shells only
+#         .bashrc  interactive non-login shells                   <- a plain terminal
 #
-# The alias and the completion are meaningless without a keyboard, so those stay in the
-# interactive rc where they belong.
+# bash is the awkward one: neither file covers both cases, and Ubuntu's stock .bashrc does
+# not source .profile. Putting the environment only in .profile leaves `pluto: not found`
+# in an ordinary terminal, so bash gets it in both places.
+emit_env_block() {
+  printf '\n%s\n' "# >>> pluto >>>"
+  printf 'export PLUTO_HOME="%s"\n' "$VAULT"
+  printf 'case ":$PATH:" in *":%s/bin:"*) ;; *) export PATH="%s/bin:$PATH" ;; esac\n' "$VAULT" "$VAULT"
+  printf '%s\n' "# <<< pluto <<<"
+}
+
+emit_interactive_block() { # IS_ZSH
+  printf '\n%s\n' "# >>> pluto (interactive) >>>"
+  if [ -n "$1" ]; then
+    printf '# Free text goes straight to your agent: `pluto how do I clean my mac safely?`\n'
+    printf '# noglob stops zsh expanding the ? and * before pluto ever sees them.\n'
+    printf "alias pluto='noglob pluto'\n"
+    printf '(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u }\n'
+    printf '[ -f "$PLUTO_HOME/completions/pluto.zsh" ] && source "$PLUTO_HOME/completions/pluto.zsh"\n'
+  else
+    printf '[ -f "$PLUTO_HOME/completions/pluto.bash" ] && source "$PLUTO_HOME/completions/pluto.bash"\n'
+  fi
+  printf '%s\n' "# <<< pluto (interactive) <<<"
+}
+
+append_block() { # FILE MARKER EMITTER [ARG]
+  local f="$1" marker="$2" fn="$3" arg="${4:-}"
+  if [ -f "$f" ] && grep -q "$marker" "$f" 2>/dev/null; then
+    skip "$(rel "$f") already has it"
+    return 0
+  fi
+  "$fn" "$arg" >> "$f"
+  ok "$(rel "$f")"
+}
+
 phase_shell() {
   step "PHASE 7 — shell"
-  local env_rc inter_rc is_zsh="" start="# >>> pluto >>>" end="# <<< pluto <<<"
+  local is_zsh="" env_files inter_file f
   case "${SHELL:-}" in
-    */zsh)  env_rc="$HOME/.zshenv"; inter_rc="$HOME/.zshrc";  is_zsh=1 ;;
-    */bash) env_rc="$HOME/.profile"; inter_rc="$HOME/.bashrc" ;;
-    *)      env_rc="$HOME/.profile"; inter_rc="" ;;
+    */zsh)  is_zsh=1; env_files="$HOME/.zshenv";              inter_file="$HOME/.zshrc" ;;
+    */bash)          env_files="$HOME/.profile $HOME/.bashrc"; inter_file="$HOME/.bashrc" ;;
+    *)               env_files="$HOME/.profile";               inter_file="" ;;
   esac
 
   if [ "$WANT_SHELL" = no ]; then
@@ -590,65 +622,39 @@ phase_shell() {
     return 0
   fi
 
-  info "env -> $(rel "$env_rc")   (every shell, so scripts and ssh see pluto too)"
-  [ -n "$inter_rc" ] && info "interactive -> $(rel "$inter_rc")   (completion$([ -n "$is_zsh" ] && printf ', noglob alias'))"
+  info "PLUTO_HOME and PATH -> $(for f in $env_files; do printf '%s ' "$(rel "$f")"; done)"
+  [ -n "$inter_file" ] && info "completion$([ -n "$is_zsh" ] && printf ' and the noglob alias') -> $(rel "$inter_file")"
 
-  if ! confirm "append pluto blocks to them?" y; then
+  if ! confirm "append pluto blocks?" y; then
     skip "declined"
     print_shell_block "$is_zsh"
     return 0
   fi
   if [ -n "$DRY_RUN" ]; then
-    dim "append env block to $(rel "$env_rc")"
-    [ -n "$inter_rc" ] && dim "append interactive block to $(rel "$inter_rc")"
+    for f in $env_files; do dim "append env block to $(rel "$f")"; done
+    [ -n "$inter_file" ] && dim "append interactive block to $(rel "$inter_file")"
     return 0
   fi
 
-  if [ -f "$env_rc" ] && grep -q "$start" "$env_rc" 2>/dev/null; then
-    skip "$(rel "$env_rc") already has a pluto block"
-  else
-    {
-      printf '\n%s\n' "$start"
-      printf 'export PLUTO_HOME="%s"\n' "$VAULT"
-      printf 'case ":$PATH:" in *":%s/bin:"*) ;; *) export PATH="%s/bin:$PATH" ;; esac\n' "$VAULT" "$VAULT"
-      printf '%s\n' "$end"
-    } >> "$env_rc"
-    ok "$(rel "$env_rc")"
+  for f in $env_files; do
+    append_block "$f" "# >>> pluto >>>" emit_env_block
+  done
+  if [ -n "$inter_file" ]; then
+    append_block "$inter_file" "# >>> pluto (interactive) >>>" emit_interactive_block "$is_zsh"
   fi
-
-  [ -n "$inter_rc" ] || return 0
-  if [ -f "$inter_rc" ] && grep -q "$start" "$inter_rc" 2>/dev/null; then
-    skip "$(rel "$inter_rc") already has a pluto block"
-    return 0
-  fi
-  {
-    printf '\n%s\n' "$start"
-    if [ -n "$is_zsh" ]; then
-      printf '# Free text goes straight to your agent: `pluto how do I clean my mac safely?`\n'
-      printf '# noglob stops zsh expanding the ? and * before pluto ever sees them.\n'
-      printf "alias pluto='noglob pluto'\n"
-      # Only bootstrap the completion system if nothing else has. A configured zsh already
-      # ran compinit its own way (custom dumpfile, -C, a framework) and re-running it there
-      # is slow and overrides a deliberate setup. A bare zsh has no compdef at all, and
-      # completion is simply dead without this.
-      printf '(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u }\n'
-      printf '[ -f "$PLUTO_HOME/completions/pluto.zsh" ] && source "$PLUTO_HOME/completions/pluto.zsh"\n'
-    else
-      printf '[ -f "$PLUTO_HOME/completions/pluto.bash" ] && source "$PLUTO_HOME/completions/pluto.bash"\n'
-    fi
-    printf '%s\n' "$end"
-  } >> "$inter_rc"
-  ok "$(rel "$inter_rc") — open a new shell to pick it up"
+  info "open a new shell to pick it up"
 }
 
 print_shell_block() { # IS_ZSH
   info "add this by hand:"
-  dim "export PLUTO_HOME=\"$VAULT\"                    # in .zshenv / .profile"
-  dim "export PATH=\"$VAULT/bin:\$PATH\"                # in .zshenv / .profile"
+  dim "export PLUTO_HOME=\"$VAULT\""
+  dim "export PATH=\"$VAULT/bin:\$PATH\""
   if [ -n "$1" ]; then
+    dim "  ^ in ~/.zshenv, so every zsh sees it"
     dim "alias pluto='noglob pluto'                   # in .zshrc"
     dim "source \"$VAULT/completions/pluto.zsh\"        # in .zshrc, after compinit"
   else
+    dim "  ^ in BOTH ~/.profile (login) and ~/.bashrc (interactive)"
     dim "source \"$VAULT/completions/pluto.bash\"       # in .bashrc"
   fi
   return 0
