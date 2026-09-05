@@ -1,3 +1,5 @@
+![pluto](docs/pluto-banner.svg)
+
 # pluto
 
 Persistent memory for a coding agent, made of plain markdown files you own.
