@@ -308,7 +308,7 @@ phase_semantic() {
   "$VENV_PY" -m pip install --quiet mcp sqlite-vec
   ok "mcp + sqlite-vec installed"
 
-  if ! have ollama; then
+  if ! have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
     if have brew && confirm "ollama is not installed. install it with brew?" y; then
       brew install ollama
     else
@@ -319,18 +319,25 @@ phase_semantic() {
   fi
   ok "ollama present"
 
-  if ! curl -sf -m 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
-    warn "ollama is installed but not responding on :11434"
+  local ollama_url="${PLUTO_OLLAMA_URL:-http://localhost:11434}"
+  if ! curl -sf -m 3 "$ollama_url/api/tags" >/dev/null 2>&1; then
+    warn "ollama not responding at $ollama_url"
     info "start it (\`ollama serve\`, or open the app), then run:"
     info "  $VENV_PY $VAULT/.claude/scripts/pluto_index.py"
     return 0
   fi
 
-  if ollama list 2>/dev/null | grep -q "nomic-embed-text-v2-moe"; then
+  if curl -sf -m 5 "$ollama_url/api/tags" 2>/dev/null | grep -q "nomic-embed-text-v2-moe"; then
     skip "embedding model already pulled"
-  else
+  elif have ollama; then
     info "pulling nomic-embed-text-v2-moe (~1 GB)"
     ollama pull nomic-embed-text-v2-moe
+  else
+    # Remote Ollama, no local CLI to pull with. Say where the model has to come from.
+    warn "the embedding model is missing and there is no local ollama to pull it"
+    info "on the host running $ollama_url:  ollama pull nomic-embed-text-v2-moe"
+    SKIPPED_TIERS="$SKIPPED_TIERS model"
+    return 0
   fi
 
   "$VENV_PY" "$VAULT/.claude/scripts/pluto_index.py" || warn "index build failed — fix and re-run pluto_index.py"

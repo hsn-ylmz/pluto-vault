@@ -1,9 +1,12 @@
 #!{{PY}}
 """Index the vault into a local sqlite-vec table. Embeddings via Ollama. Nothing leaves the machine."""
-import sqlite3, sqlite_vec, urllib.request, json, hashlib, sys
+import sqlite3, sqlite_vec, urllib.request, json, hashlib, os, sys
 from pathlib import Path
 
 VAULT = Path(__file__).resolve().parents[2]
+# Ollama is normally on this machine. PLUTO_OLLAMA_URL points it elsewhere — a container
+# reaching the host, or a box on the LAN with the GPU in it.
+OLLAMA = os.environ.get("PLUTO_OLLAMA_URL", "http://localhost:11434").rstrip("/")
 DB = VAULT / ".pluto" / "index.db"
 DIM = 768          # nomic-embed-text-v2-moe (verified at install: actual dim 768)
 MODEL = "nomic-embed-text-v2-moe"
@@ -19,7 +22,7 @@ def embed(text: str, kind: str = "document"):
     ):
         try:
             req = urllib.request.Request(
-                "http://localhost:11434" + path,
+                OLLAMA + path,
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
             )
@@ -27,7 +30,7 @@ def embed(text: str, kind: str = "document"):
             return out[0] if key == "embeddings" else out
         except Exception:
             continue
-    raise RuntimeError("ollama embedding failed — is `ollama serve` running?")
+    raise RuntimeError(f"ollama embedding failed at {OLLAMA} — is `ollama serve` running?")
 
 def chunks(text, size=CHUNK, overlap=OVERLAP):
     i = 0
