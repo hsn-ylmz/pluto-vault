@@ -27,6 +27,7 @@ ASSUME_YES=""
 DRY_RUN=""
 
 VENV_PY=""          # filled in by the semantic phase; empty means no MCP
+VENV_BROKEN=""      # a .venv exists but cannot import what the tier needs
 BACKUP_DIR=""
 BACKUP_LABEL=""
 INSTALLED=0
@@ -156,22 +157,26 @@ py_can_venv() { # PYTHON
   "$1" -c "import ensurepip" >/dev/null 2>&1
 }
 
-# Set when no interpreter qualifies, so the message can name the actual problem instead of
-# saying "none found" for two very different causes.
-PY_PROBLEM=""
+# Results go in globals and the function is called directly, NEVER as `$(pick_python)`:
+# a command substitution runs in a subshell, so the diagnosis would be discarded and every
+# failure would be reported as whichever cause happens to be checked last.
+PY_CHOSEN=""          # the interpreter, empty if none qualified
+PY_PROBLEM=""         # venv | extensions — why none qualified
+PY_VENV_CANDIDATE=""  # a python that loads extensions but cannot build a venv
 
-pick_python() { # -> interpreter on stdout, empty if none qualify
+pick_python() {
   local c saw_ext=""
+  PY_CHOSEN=""; PY_PROBLEM=""; PY_VENV_CANDIDATE=""
   for c in "$(brew --prefix 2>/dev/null)/bin/python3" python3.13 python3.12 python3.11 python3; do
     [ -n "$c" ] || continue
     have "$c" || continue
     py_loads_extensions "$c" || continue
     saw_ext=1
-    if py_can_venv "$c"; then command -v "$c"; return 0; fi
+    if py_can_venv "$c"; then PY_CHOSEN="$(command -v "$c")"; return 0; fi
     PY_VENV_CANDIDATE="$(command -v "$c")"
   done
   if [ -n "$saw_ext" ]; then PY_PROBLEM=venv; else PY_PROBLEM=extensions; fi
-  return 0
+  return 1
 }
 
 # The exact command for this machine, not a generic "install the venv package".
@@ -228,11 +233,25 @@ phase_preflight() {
 # Runs before any rendering: {{PY}} goes into the script shebangs in PHASE 3, long before
 # the semantic tier is offered in PHASE 4. Re-running an existing vault without --semantic
 # must not rewrite a working shebang into a broken one.
+# A venv is healthy when it can import what the tier needs, not when its python exists.
+# An interrupted `python3 -m venv` leaves the interpreter behind with no packages in it,
+# and adopting that means the tier reports itself installed and then fails verification.
+venv_healthy() { # PYTHON
+  [ -x "$1" ] || return 1
+  "$1" -c "import sqlite_vec, mcp" >/dev/null 2>&1
+}
+
 adopt_venv() {
-  if [ -x "$VAULT/.venv/bin/python" ]; then
-    VENV_PY="$VAULT/.venv/bin/python"
-    step "existing install"
-    ok "venv adopted: $(rel "$VENV_PY")"
+  local p="$VAULT/.venv/bin/python"
+  [ -e "$VAULT/.venv" ] || return 0
+  step "existing install"
+  VENV_PY="$p"
+  if venv_healthy "$p"; then
+    ok "venv adopted: $(rel "$p")"
+  else
+    VENV_BROKEN=1
+    warn "the virtualenv at $(rel "$VAULT/.venv") is incomplete"
+    info "usually an install that was interrupted partway. It will be rebuilt."
   fi
 }
 
@@ -289,7 +308,7 @@ phase_code() {
 phase_semantic() {
   step "PHASE 4 — semantic search (optional)"
 
-  if [ -n "$VENV_PY" ] && [ "$WANT_SEMANTIC" != yes ]; then
+  if [ -n "$VENV_PY" ] && [ -z "$VENV_BROKEN" ] && [ "$WANT_SEMANTIC" != yes ]; then
     skip "semantic tier already installed — pass --semantic to refresh it"
     return 0
   fi
@@ -308,8 +327,8 @@ phase_semantic() {
   fi
 
   local py fix
-  PY_VENV_CANDIDATE=""
-  py="$(pick_python)"
+  py=""
+  if pick_python; then py="$PY_CHOSEN"; fi
   if [ -z "$py" ]; then
     if [ "$PY_PROBLEM" = venv ]; then
       fix="$(venv_fix_hint "${PY_VENV_CANDIDATE:-python3}")"
@@ -318,7 +337,7 @@ phase_semantic() {
       info "  $fix"
       if [ -z "$DRY_RUN" ] && have sudo && confirm "run that now?" n; then
         if sh -c "$fix"; then
-          py="$(pick_python)"
+          if pick_python; then py="$PY_CHOSEN"; fi
         else
           warn "that failed — run it yourself, then: ./install.sh --semantic"
         fi
@@ -340,6 +359,15 @@ phase_semantic() {
     dim "ollama pull nomic-embed-text-v2-moe; build index"
     VENV_PY="$VAULT/.venv/bin/python"
     return 0
+  fi
+
+  # Only now, with a working interpreter in hand, is it safe to throw the broken one away:
+  # .venv is disposable and gitignored, but deleting it before we can rebuild would leave
+  # the script shebangs pointing at nothing.
+  if [ -n "$VENV_BROKEN" ]; then
+    rm -rf "$VAULT/.venv"
+    VENV_BROKEN=""
+    info "removed the incomplete virtualenv"
   fi
 
   if [ ! -x "$VAULT/.venv/bin/python" ]; then
@@ -697,6 +725,9 @@ phase_verify() {
   check "free text dispatches" bash -c 'cd /; PLUTO_DRY_RUN=1 PLUTO_HOME="$1" "$1/bin/pluto" what should I work on' _ "$VAULT"
   check "--names for completion" bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --names | grep -q .' _ "$VAULT"
   check "bash completion parses"  bash -n "$VAULT/completions/pluto.bash"
+  case " $SKIPPED_TIERS " in
+    *" semantic "*) VENV_PY="" ;;   # not installed, so nothing to check
+  esac
   if [ -n "$VENV_PY" ]; then
     check "venv python"        test -x "$VENV_PY"
     check "sqlite-vec imports" "$VENV_PY" -c "import sqlite_vec, mcp"
