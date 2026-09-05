@@ -24,7 +24,6 @@ ASSUME_YES=""
 DRY_RUN=""
 WANT_NOTES="ask"
 WANT_PACKAGES="ask"
-EVERYTHING=""
 MANIFEST_REL=".pluto/installed-by-pluto"
 REMOVED=0
 
@@ -60,7 +59,7 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
     --vault)         shift; [ $# -gt 0 ] || die "--vault needs a path" 2; VAULT="$1" ;;
-    --everything)    EVERYTHING=1; WANT_NOTES=yes ;;
+    --everything)    WANT_NOTES=yes ;;
     --keep-notes)    WANT_NOTES=no ;;
     --keep-packages) WANT_PACKAGES=no ;;
     -y|--yes)        ASSUME_YES=1 ;;
@@ -73,6 +72,7 @@ done
 
 VAULT="${VAULT/#\~/$HOME}"
 
+# shellcheck disable=SC2088  # the tilde is printed, not expanded — that is the point
 rel() { case "$1" in "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;; *) printf '%s\n' "$1" ;; esac; }
 
 # Same rule as install.sh: root needs no sudo, and minimal images ship without the binary.
@@ -171,6 +171,7 @@ if [ -f "$HOME/.claude/settings.json" ]; then
   else
     # Remove only our entry. Everything else in that file belongs to the user, and
     # rewriting it wholesale is how this kind of uninstaller earns its reputation.
+    # shellcheck disable=SC2088  # display string
     python3 - <<'PY' && ok "~/.claude/settings.json — pluto SessionStart entry removed" || warn "could not edit ~/.claude/settings.json"
 import json, pathlib, sys
 p = pathlib.Path.home() / ".claude" / "settings.json"
@@ -202,9 +203,10 @@ if command -v claude >/dev/null 2>&1; then
   fi
 fi
 
-for cfg in "$HOME/.cursor/mcp.json"; do
-  [ -f "$cfg" ] || continue
-  if [ -n "$DRY_RUN" ]; then dim "would remove the pluto server from $(rel "$cfg")"; continue; fi
+cfg="$HOME/.cursor/mcp.json"
+if [ -f "$cfg" ] && [ -n "$DRY_RUN" ]; then
+  dim "would remove the pluto server from $(rel "$cfg")"
+elif [ -f "$cfg" ]; then
   CFG="$cfg" python3 - <<'PY' && ok "$(rel "$cfg") — pluto server removed" || true
 import json, os, pathlib, sys
 p = pathlib.Path(os.environ["CFG"])
@@ -218,7 +220,7 @@ if "pluto" not in servers:
 servers.pop("pluto")
 p.write_text(json.dumps(data, indent=2) + "\n")
 PY
-done
+fi
 
 # ------------------------------------------------------------------------ 3. generated
 

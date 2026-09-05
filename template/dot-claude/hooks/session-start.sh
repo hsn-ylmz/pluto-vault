@@ -17,7 +17,7 @@ CTX=""
 
 LAST=$(ls -1 "$V/daily"/*.md 2>/dev/null | tail -1)
 if [ -n "${LAST:-}" ]; then
-  CTX="$CTX[last log: $(basename "$LAST")]
+  CTX="${CTX}[last log: $(basename "$LAST")]
 $(tail -20 "$LAST")
 "
 fi

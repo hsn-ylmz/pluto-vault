@@ -97,6 +97,7 @@ esac
 
 # ------------------------------------------------------------------------------ helpers
 
+# shellcheck disable=SC2088  # the tilde is printed, not expanded — that is the point
 rel() { case "$1" in "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;; *) printf '%s\n' "$1" ;; esac; }
 
 render_to() { # SRC DST
@@ -858,6 +859,7 @@ else:
     print("already present")
 PY
 )"
+  # shellcheck disable=SC2088  # display string
   ok "~/.claude/settings.json SessionStart hook: $merged"
   cp "$SRC/template/dot-claude/commands/pref.md" "$HOME/.claude/commands/pref.md"
   ok "/pref available everywhere"
