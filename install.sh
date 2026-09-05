@@ -598,6 +598,33 @@ phase_semantic() {
       sleep 2
     fi
   fi
+  # No systemd (containers, WSL, a plain macOS shell) means the unit the installer wrote is
+  # never started, and everything below fails on a connection refused. Offer to run it here.
+  # This is a foreground daemon parked in the background: it dies with the machine, which is
+  # said plainly rather than left to be discovered after the next reboot.
+  if [ -z "$DRY_RUN" ] && have ollama \
+     && ! http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" \
+     && case "${PLUTO_OLLAMA_URL:-http://localhost:11434}" in *localhost*|*127.0.0.1*) true ;; *) false ;; esac
+  then
+    warn "ollama is installed but nothing is listening"
+    info "no service manager started it, so it has to be run directly"
+    if confirm "start 'ollama serve' in the background now?" y; then
+      mkdir -p "$VAULT/.pluto"
+      nohup ollama serve >"$VAULT/.pluto/ollama.log" 2>&1 &
+      local waited=0
+      while [ "$waited" -lt 20 ]; do
+        http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" && break
+        sleep 1
+        waited=$((waited + 1))
+      done
+      if http_ok "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags"; then
+        ok "ollama serving (log: $(rel "$VAULT/.pluto/ollama.log"))"
+        info "it stops when this machine does; start it again with: ollama serve"
+      else
+        warn "it did not come up in 20s — see $(rel "$VAULT/.pluto/ollama.log")"
+      fi
+    fi
+  fi
 
   local ollama_url="${PLUTO_OLLAMA_URL:-http://localhost:11434}"
   if ! http_ok "$ollama_url/api/tags"; then
