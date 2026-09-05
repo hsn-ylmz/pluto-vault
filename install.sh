@@ -699,11 +699,14 @@ install_ollama() {
       info "Ollama's documented Linux install is a script fetched from the network:"
       dim "  curl -fsSL https://ollama.com/install.sh | sh"
       confirm "run it?" y || return 1
-      # Not just for fetching the script: ollama's installer shells out to curl itself,
-      # so having wget or python3 instead is not enough here.
-      if ! have curl; then
-        ensure_tool curl curl y "the Ollama installer needs curl, and it is not installed" || return 1
-      fi
+      # Ollama's installer has its own dependencies and reports them one at a time, so
+      # they are satisfied up front rather than discovered across three failed attempts:
+      # it shells out to curl, and unpacks a zstd-compressed archive.
+      local dep
+      for dep in curl tar zstd; do
+        have "$dep" && continue
+        ensure_tool "$dep" "$dep" y "Ollama's installer needs $dep" || return 1
+      done
       run_quiet "installing ollama" "curl -fsSL https://ollama.com/install.sh | sh" || return 1
       record_installed script ollama
       ;;
