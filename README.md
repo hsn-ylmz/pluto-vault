@@ -52,7 +52,7 @@ your dependency. Fork it and change it.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/pluto.git
+git clone https://github.com/hsn-ylmz/pluto.git
 cd pluto
 ./install.sh
 ```
