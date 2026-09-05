@@ -47,3 +47,7 @@ environment. Keep the Ubuntu image bare.
 - `zsh -ic` has the alias and `$_comps[pluto]` is `_pluto`.
 - Deleting `~/pluto/.venv/lib` to simulate an interrupted install makes the next run
   report the virtualenv as incomplete and rebuild it.
+- Running as root on an image with no `sudo` still installs packages, with the `sudo`
+  prefix dropped rather than the prompt silently skipped.
+- With no `curl`, the Ollama probe still works (it falls back to `python3`), and installing
+  Ollama pulls in `curl`, `tar` and `zstd` first.
