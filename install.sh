@@ -139,6 +139,22 @@ put_content() { # TEMPLATE_REL DST_REL
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Package managers are loud, and a wall of dpkg progress buries the one line that says what
+# pluto actually did. Keep the output, show it only when it turns out to matter.
+run_quiet() { # DESCRIPTION COMMAND
+  local desc="$1" cmd="$2" log
+  log="$(mktemp)"
+  printf '    ... %s\n' "$desc"
+  if sh -c "$cmd" >"$log" 2>&1; then
+    rm -f "$log"
+    return 0
+  fi
+  warn "$desc failed:"
+  tail -20 "$log" | sed 's/^/      /' >&2
+  rm -f "$log"
+  return 1
+}
+
 # ---------------------------------------------------------------------------- platform
 #
 # One detection, one place. Everything that installs something asks these rather than
@@ -240,7 +256,7 @@ ensure_tool() {
     return 1
   fi
   confirm "install it now?" "$def" || return 1
-  sh -c "$cmd" || { warn "that failed — run it yourself and re-run this installer"; return 1; }
+  run_quiet "installing $pkg" "$cmd" || { info "run it yourself, then re-run this installer"; return 1; }
   have "$bin" || return 1
   record_installed "$PKG" "$pkg"
 }
@@ -470,7 +486,7 @@ phase_semantic() {
       if [ -z "$DRY_RUN" ] && ! pkg_can_install; then
         warn "that needs root, and neither sudo nor a root shell is available here"
       elif [ -z "$DRY_RUN" ] && confirm "run that now?" y; then
-        if sh -c "$fix"; then
+        if run_quiet "installing $(pkg_for venv)" "$fix"; then
           record_installed "$PKG" "$(pkg_for venv)"
           if pick_python; then py="$PY_CHOSEN"; fi
         else
@@ -529,7 +545,7 @@ phase_semantic() {
   VENV_PY="$VAULT/.venv/bin/python"
 
   if ! "$VENV_PY" -m pip install --quiet --upgrade pip >/dev/null 2>&1 \
-     || ! "$VENV_PY" -m pip install --quiet mcp sqlite-vec; then
+     || ! "$VENV_PY" -m pip install --quiet mcp sqlite-vec >/dev/null 2>&1; then
     warn "pip could not install mcp and sqlite-vec (offline, or a proxy in the way)"
     info "retry later with: ./install.sh --semantic"
     VENV_PY=""
@@ -629,7 +645,7 @@ install_claude_code() {
   # Installing the binary is all this does. Signing in is a separate, interactive step that
   # belongs to you, and the installer never touches credentials.
   confirm "install Claude Code now? (installs the CLI only; you sign in yourself)" y || return 1
-  npm install -g @anthropic-ai/claude-code || { warn "npm install failed"; return 1; }
+  run_quiet "installing @anthropic-ai/claude-code" "npm install -g @anthropic-ai/claude-code" || return 1
   have claude || return 1
   record_installed npm @anthropic-ai/claude-code
 }
@@ -648,7 +664,7 @@ install_ollama() {
         }
       fi
       confirm "ollama is not installed. install it with brew?" y || return 1
-      brew install ollama || return 1
+      run_quiet "installing ollama" "brew install ollama" || return 1
       record_installed brew ollama
       ;;
     linux)
@@ -658,7 +674,7 @@ install_ollama() {
       dim "  curl -fsSL https://ollama.com/install.sh | sh"
       confirm "run it?" y || return 1
       have curl || { warn "curl is required to install ollama that way"; return 1; }
-      curl -fsSL https://ollama.com/install.sh | sh || return 1
+      run_quiet "installing ollama" "curl -fsSL https://ollama.com/install.sh | sh" || return 1
       record_installed script ollama
       ;;
     *)
