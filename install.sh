@@ -611,7 +611,7 @@ phase_verify() {
     check "venv python"        test -x "$VENV_PY"
     check "sqlite-vec imports" "$VENV_PY" -c "import sqlite_vec, mcp"
     # Importing proves the deps resolve; speaking JSON-RPC proves the server actually serves.
-    check "mcp server responds"  "$SRC/lib/mcp-smoke.sh" "$VENV_PY" "$VAULT"
+    check "mcp server responds"  python3 "$SRC/lib/mcp-smoke.py" "$VENV_PY" "$VAULT"
   fi
   [ "$fail" -eq 0 ] || die "$fail check(s) failed"
 }
