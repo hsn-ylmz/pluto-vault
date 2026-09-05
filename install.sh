@@ -539,6 +539,11 @@ phase_shell() {
       printf '# Free text goes straight to your agent: `pluto how do I clean my mac safely?`\n'
       printf '# noglob stops zsh expanding the ? and * before pluto ever sees them.\n'
       printf "alias pluto='noglob pluto'\n"
+      # Only bootstrap the completion system if nothing else has. A configured zsh already
+      # ran compinit its own way (custom dumpfile, -C, a framework) and re-running it there
+      # is slow and overrides a deliberate setup. A bare zsh has no compdef at all, and
+      # completion is simply dead without this.
+      printf '(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u }\n'
       printf '[ -f "$PLUTO_HOME/completions/pluto.zsh" ] && source "$PLUTO_HOME/completions/pluto.zsh"\n'
     else
       printf '[ -f "$PLUTO_HOME/completions/pluto.bash" ] && source "$PLUTO_HOME/completions/pluto.bash"\n'
