@@ -244,6 +244,9 @@ if [ "$WANT_PACKAGES" = no ]; then
 elif [ ! -f "$MANIFEST" ]; then
   skip "nothing recorded, so nothing is assumed"
 else
+  # Reverse install order. Removing nodejs before the npm package it installed destroys the
+  # npm that would have removed it, leaving an orphaned binary behind — which is exactly
+  # what happened the first time this ran.
   while IFS=$'\t' read -r kind name when; do
     [ -n "${name:-}" ] || continue
     cmd=""
@@ -282,7 +285,7 @@ else
     info "  $cmd"
     if [ -n "$DRY_RUN" ]; then continue; fi
     confirm "remove $name?" y && { run_quiet "removing $name" "$cmd" && ok "$name removed" || true; }
-  done < "$MANIFEST"
+  done < <(awk '{ a[NR] = $0 } END { for (i = NR; i > 0; i--) print a[i] }' "$MANIFEST")
 fi
 
 # -------------------------------------------------------------------------- 6. content
