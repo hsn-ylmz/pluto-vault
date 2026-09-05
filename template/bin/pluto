@@ -182,19 +182,50 @@ require_agent() {
   exit 127
 }
 
+# Model tier. Vault work is the daily stuff — a log entry, a quick capture, a question
+# you want answered rather than researched — and it does not need the expensive model.
+# A registered project is real work and gets the default. `-q` and `--deep` override.
+#
+# Deliberately a directory test, not a model call that classifies the question: the
+# launch path stays free of network and latency (see the note at the top of this file).
+# --model is Claude Code's flag, so it is only passed when the agent is Claude Code;
+# another PLUTO_AGENT gets its arguments untouched.
+model_args() { # DIR -> zero or two lines of agent flags
+  local dir="$1" tier="${PLUTO_TIER:-}" model=""
+  case "$(basename "$AGENT")" in claude) ;; *) return 0 ;; esac
+
+  if [ -z "$tier" ]; then
+    if [ "$dir" = "$PLUTO" ]; then tier=quick; else tier=deep; fi
+  fi
+  case "$tier" in
+    quick) model="${PLUTO_QUICK_MODEL-haiku}" ;;
+    deep)  model="${PLUTO_DEEP_MODEL-}" ;;
+  esac
+  # Empty means "whatever the agent is already configured to use". Setting
+  # PLUTO_QUICK_MODEL= turns the tiering off without editing this file.
+  [ -n "$model" ] && printf '%s\n%s\n' --model "$model"
+  return 0
+}
+
 launch() { # DIR [agent args...]
   local dir="$1"; shift
   [ -d "$dir" ] || die "missing directory: $dir"
+  # bash 3.2 has no mapfile, and ${a[@]} on an empty array trips `set -u` there, hence
+  # the read loop and the ${a[@]+...} guard.
+  local margs=() a
+  while IFS= read -r a; do margs+=("$a"); done < <(model_args "$dir")
+
   if [ -n "${PLUTO_DRY_RUN:-}" ]; then
     printf 'dir: %s\n' "$dir"
     printf 'agent: %s\n' "$AGENT"
+    printf 'model: %s\n' "${margs[1]:-<agent default>}"
     if [ $# -gt 0 ]; then
       printf 'arg: %s\n' "$@"
     fi
     exit 0
   fi
   require_agent
-  cd "$dir" && exec "$AGENT" "$@"
+  cd "$dir" && exec "$AGENT" ${margs[@]+"${margs[@]}"} "$@"
 }
 
 # --------------------------------------------------------------------------- commands
@@ -206,7 +237,22 @@ pluto — open a project with your agent, ask it anything, and manage the regist
 USAGE
   pluto                        pick a project interactively
   pluto NAME [agent args...]   open NAME, forwarding remaining args to the agent
-  pluto TEXT...                ask TEXT, here or in the vault (see FREE TEXT)
+  pluto TEXT...                ask TEXT, here or in the vault (see MODEL TIER
+  Vault work is daily stuff — a log entry, a capture, a question you want answered
+  rather than researched — so it runs on the cheap model. A registered project is
+  real work and gets your default. Nothing classifies the question; it is the
+  directory, decided with no network call on the launch path.
+
+      pluto how do I clear the DNS cache      vault   -> \$PLUTO_QUICK_MODEL (haiku)
+      pluto api-server audit the parser       project -> your default model
+      pluto -q api-server what does WP2 mean  forced cheap
+      pluto --deep how should I structure     forced default, in the vault
+
+  \$PLUTO_QUICK_MODEL defaults to 'haiku'. Set it empty to turn tiering off.
+  \$PLUTO_DEEP_MODEL is unset, meaning whatever the agent already uses.
+  Only applied when \$PLUTO_AGENT is Claude Code; other agents get their args untouched.
+
+FREE TEXT)
 
 AGENT
   \$PLUTO_AGENT, currently '$AGENT'. Any CLI taking [flags] [prompt] works.
@@ -220,6 +266,8 @@ COMMANDS
       --remove NAME            delete NAME's registry entry (asks first)
       --status                 git / mtime state of every registered project
       --ask TEXT...            force TEXT to be a question, never a project name
+  -q, --quick                  force the cheap model for this call (see MODEL TIER)
+      --deep                   force the default model for this call
   -h, --help                   this text
       --version
 
@@ -487,6 +535,17 @@ pick() { # -> selected registry row on stdout, empty if cancelled
 }
 
 # -------------------------------------------------------------------------- dispatch
+
+# Tier flags are consumed first so they can lead anything: a question, a project name,
+# or nothing. They never reach the agent.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -q|--quick) PLUTO_TIER=quick; shift ;;
+    --deep)     PLUTO_TIER=deep;  shift ;;
+    *) break ;;
+  esac
+done
+export PLUTO_TIER="${PLUTO_TIER:-}"
 
 case "${1:-}" in
   -h|--help)   cmd_help; exit 0 ;;

@@ -33,6 +33,7 @@ your dependency. Fork it and change it.
 - [What you get](#what-you-get)
 - [Command reference](#command-reference)
 - [Free text](#free-text)
+- [Model tier](#model-tier)
 - [Adding projects and completion](#adding-projects-and-completion)
 - [Agents](#agents)
 - [Semantic search](#semantic-search)
@@ -256,6 +257,30 @@ Bash needs no alias; it leaves unmatched globs alone.
 
 ---
 
+## Model tier
+
+Vault work is daily stuff: a log entry, a capture, a question you want answered rather
+than researched. It does not need the expensive model. A registered project is real work
+and gets your default.
+
+```
+pluto how do I clear the DNS cache      vault   -> cheap model
+pluto api-server audit the parser       project -> your default
+pluto -q api-server what does WP2 mean  forced cheap
+pluto --deep how should I structure     forced default, in the vault
+```
+
+Nothing classifies the question. It is a directory test, so the launch path stays free of
+network calls and latency, and you can always predict what you will get.
+
+| Variable | Effect |
+|---|---|
+| `PLUTO_QUICK_MODEL` | model for vault work. Defaults to `haiku`. Set it empty to turn tiering off entirely. |
+| `PLUTO_DEEP_MODEL` | model for project work. Unset, meaning whatever your agent already uses. |
+
+`--model` is Claude Code's flag, so this only applies when your agent is Claude Code. Any
+other `PLUTO_AGENT` gets its arguments untouched.
+
 ## Adding projects and completion
 
 ```bash
@@ -442,6 +467,8 @@ Environment variables:
 |---|---|
 | `PLUTO_HOME` | vault location. Defaults to `~/pluto`. Every script falls back to that default, because hooks also run in shells that never read your rc files. |
 | `PLUTO_AGENT` | the CLI the launcher runs. Defaults to `claude`. The installer sets it for you when you pick a different agent. |
+| `PLUTO_QUICK_MODEL` | model for vault work. Defaults to `haiku`; empty disables tiering. |
+| `PLUTO_DEEP_MODEL` | model for project work. Unset means the agent's own default. |
 | `PLUTO_OLLAMA_URL` | where Ollama lives. Defaults to `http://localhost:11434`. |
 | `PLUTO_BACKUP_DIR` | overrides the backup target chosen at install time. |
 | `PLUTO_DRY_RUN` | makes the launcher print its target instead of starting an agent. Used by the test suite. |
