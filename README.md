@@ -436,16 +436,25 @@ manual, and a model that was actually in the conversation writes it.
 
 Re-run `install.sh`. It knows which files are yours.
 
-**Code** is always brought up to date: `bin/`, `.claude/hooks/`, `.claude/scripts/`,
-`completions/`, `settings.json`. A stale hook is a bug, not a preference. If your copy
-differs, the previous version is saved next to it as `.bak` first.
+**Code** is always brought up to date, by name rather than by directory: `bin/pluto`,
+`bin/_pluto_registry.sh`, the four hooks, the four `.claude/scripts/`, both completions,
+`.claude/settings.json`, `.claude/commands/`, `.mcp.json` and `.gitignore`. A stale hook is
+a bug, not a preference. If your copy differs, the previous version is saved next to it as
+`.bak` first.
 
-**Content** is created once and then never touched: `context.md`, `rules.md`,
-`preferences.md`, `projects/`, `notes/`, `daily/`. Not rewritten, not diffed, not backed
-up, because there is nothing to compare against. The moment the file exists it is yours.
+Naming them matters: `bin/pluto-local.sh` is not on that list and is never written,
+diffed or overwritten, which is what makes [local commands](#local-commands) survive an
+upgrade.
 
-Everything that writes outside the vault is behind a single flag, which is what makes the
-installer testable against throwaway vaults without reaching into a real environment.
+**Content** is created once and then never touched: `CLAUDE.md`, `context.md`, `rules.md`,
+`preferences.md` and `projects/pluto.md`. Not rewritten, not diffed, not backed up, because
+there is nothing to compare against — the moment the file exists it is yours. `notes/`,
+`daily/`, `inbox/` and `archive/` are created empty and nothing is ever written into them.
+
+Everything that writes outside the vault is behind two flags — `--no-global` for
+`~/.claude` and the global MCP registration, `--no-shell` for your rc files — which is what
+makes the installer testable against throwaway vaults without reaching into a real
+environment.
 
 ---
 
@@ -586,9 +595,9 @@ deliberately installs nothing beyond `git`, `python3`, `curl` and `zsh`: an earl
 version of the Debian image pre-installed `python3-venv`, and that single convenience hid
 a real bug from testing entirely.
 
-The installer finishes with a verify phase of 15 checks, including a JSON-RPC round-trip
-against the MCP server. That phase has caught real bugs, which is the only reason to have
-one.
+The installer finishes with a verify phase: sixteen checks, of which the three covering the
+semantic tier are skipped when you decline it. One of them is a JSON-RPC round-trip against
+the MCP server. That phase has caught real bugs, which is the only reason to have one.
 
 ---
 

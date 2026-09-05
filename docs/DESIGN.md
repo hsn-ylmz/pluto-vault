@@ -41,8 +41,8 @@ knows which files are yours.
   compare against: the moment the file exists it is yours.
 
 Anything that writes outside the vault — `~/.claude`, the shell rc, the global MCP
-registration — is behind one flag (`--no-global`, `--no-shell`), so the installer can be
-tested against a scratch vault without reaching into a real environment.
+registration — is behind `--no-global` or `--no-shell`, so the installer can be tested
+against a scratch vault without reaching into a real environment.
 
 ## Free text goes straight to the agent
 
