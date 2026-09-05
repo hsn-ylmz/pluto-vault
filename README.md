@@ -108,8 +108,11 @@ Six steps, safest first, each one confirmed:
 2. the global layer in `~/.claude`: hook, `/pref`, the SessionStart entry, the MCP server
 3. generated state in the vault: `.venv`, the embedding index, `settings.local.json`
 4. installed code in the vault: `bin/`, `.claude/`, `completions/`
-5. packages that pluto installed, and only those
+5. packages that pluto installed, and only those, in reverse install order
 6. your notes and markdown
+
+Reverse order matters: removing Node.js before the npm package it installed would destroy
+the npm needed to remove it, leaving an orphaned binary behind.
 
 Two things it will not do. It will not remove a package it did not install: the installer
 records what it installed in `.pluto/installed-by-pluto`, and anything absent from that
@@ -127,10 +130,12 @@ directory of markdown that opens in any editor, which is the point of the format
 
 Required:
 
-- an agent CLI, if you want `pluto` to actually open sessions. Claude Code by default
-  (`npm install -g @anthropic-ai/claude-code`). Everything that does not start a session
-  works without one, and `PLUTO_AGENT` points the launcher at any other command that
-  takes `[flags] [prompt]`.
+- an agent CLI, if you want `pluto` to actually open sessions. The installer offers to
+  install Claude Code for you, pulling Node.js first if npm is missing. It installs the
+  program and nothing else: signing in is yours to do, and pluto never goes near
+  credentials. `PLUTO_AGENT` points the launcher at any other command that takes
+  `[flags] [prompt]`, and everything that does not start a session works without any
+  agent at all.
 - `git`
 - `python3` (the hooks use it to escape JSON; the semantic tier needs it to load sqlite
   extensions, which the installer checks for explicitly)
@@ -464,10 +469,15 @@ venv module and a python3 with sqlite extensions each produce the right command 
 machine. Ollama is the exception with no distribution package: macOS uses Homebrew, Linux
 uses the documented install script.
 
-Consent tracks what is actually being run. A package manager that verifies what it
-installs defaults to yes. Anything that pipes a script from the network into a shell,
-which is the Homebrew bootstrap and Ollama on Linux, defaults to no and prints the command
-either way so you can run it yourself.
+Installing is the default, because it is cheap and the uninstaller records and reverses
+exactly what was installed. Claude Code, the Node.js it needs, Ollama and the embedding
+model are all offered with yes as the default. The one exception is the Homebrew
+bootstrap, which stays at no: installing a package manager into `/opt` is a different
+order of change from installing one program with it.
+
+`sudo` is used only when it is both needed and available. As root the prefix is dropped
+entirely, which matters on container images that ship no `sudo` binary; on a machine that
+is neither root nor sudo-capable, the command is printed rather than silently skipped.
 
 The tools that differ between BSD and GNU, `stat` and `date`, are probed at runtime rather
 than assumed. `backup.sh` is macOS-specific, since it looks under `~/Library/CloudStorage`.
