@@ -48,6 +48,8 @@ your dependency. Fork it and change it.
 - [Platform support](#platform-support)
 - [Troubleshooting](#troubleshooting)
 - [Non-goals](#non-goals)
+- [Further reading](#further-reading)
+- [License](#license)
 
 ---
 
@@ -114,7 +116,8 @@ Six steps, safest first, each one confirmed:
 1. the pluto blocks in your shell rc files
 2. the global layer in `~/.claude`: hook, `/pref`, the SessionStart entry, the MCP server
 3. generated state in the vault: `.venv`, the embedding index, `settings.local.json`
-4. installed code in the vault: `bin/`, `.claude/`, `completions/`
+4. installed code: `bin/pluto`, `bin/_pluto_registry.sh`, `.claude/`, `completions/` —
+   `bin/pluto-local.sh` is yours and is kept
 5. packages that pluto installed, and only those, in reverse install order
 6. your notes and markdown
 
