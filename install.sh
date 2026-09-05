@@ -398,15 +398,23 @@ phase_semantic() {
   ok "mcp + sqlite-vec installed"
 
   if ! have ollama && ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
-    if have brew && confirm "ollama is not installed. install it with brew?" y; then
-      brew install ollama
-    else
+    install_ollama || {
       warn "no ollama — index and search will not work until it is installed"
+      info "already running one elsewhere? export PLUTO_OLLAMA_URL=http://host:11434"
       SKIPPED_TIERS="$SKIPPED_TIERS ollama"
       return 0
-    fi
+    }
   fi
   ok "ollama present"
+
+  # The Linux installer sets up a systemd unit; inside a container, or on a box without
+  # systemd, nothing is listening yet and every later step would fail on a connection
+  # refused that says nothing about the cause.
+  if ! curl -sf -m 3 "${PLUTO_OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null 2>&1; then
+    if have systemctl && systemctl start ollama >/dev/null 2>&1; then
+      sleep 2
+    fi
+  fi
 
   local ollama_url="${PLUTO_OLLAMA_URL:-http://localhost:11434}"
   if ! curl -sf -m 3 "$ollama_url/api/tags" >/dev/null 2>&1; then
@@ -463,6 +471,32 @@ choose_agent() {
     info "everything except starting a session still works: --list, --status, --create ..."
     info "already have it under another name? export PLUTO_AGENT=<command>"
   fi
+}
+
+# Package managers differ, and so does what counts as consent. brew and apt verify what
+# they install; Ollama's Linux instructions are a script piped from the network into a
+# shell, which is a different proposition, so that one defaults to no and prints the
+# command either way.
+install_ollama() {
+  if have brew; then
+    confirm "ollama is not installed. install it with brew?" y || return 1
+    brew install ollama
+    return 0
+  fi
+  case "$(uname -s)" in
+    Linux)
+      info "Ollama's documented Linux install is a script fetched from the network:"
+      dim "  curl -fsSL https://ollama.com/install.sh | sh"
+      confirm "run that now?" n || return 1
+      have curl || die "curl is required to install ollama"
+      curl -fsSL https://ollama.com/install.sh | sh || return 1
+      return 0
+      ;;
+    *)
+      info "install ollama from https://ollama.com/download, then re-run with --semantic"
+      return 1
+      ;;
+  esac
 }
 
 phase_agent() {
@@ -735,8 +769,22 @@ phase_cloud() {
   BACKUP_LABEL="$(basename "$choice" | sed 's/-.*//')"
   put_code dot-claude/scripts/backup.sh .claude/scripts/backup.sh 755
   ok "backup.sh -> $(rel "$BACKUP_DIR")"
-  have age || warn "age is not installed — run: brew install age"
-  have gtimeout || have timeout || warn "no timeout(1) — run: brew install coreutils"
+  if ! have age; then
+    local cmd=""
+    if have brew;        then cmd="brew install age"
+    elif have apt-get;   then cmd="sudo apt install -y age"
+    elif have dnf;       then cmd="sudo dnf install -y age"
+    elif have pacman;    then cmd="sudo pacman -S --needed age"
+    fi
+    if [ -n "$cmd" ]; then
+      warn "age is not installed; backup.sh needs it to encrypt"
+      info "  $cmd"
+      if confirm "install it now?" y; then sh -c "$cmd" || warn "that failed — run it yourself"; fi
+    else
+      warn "age is not installed — see https://github.com/FiloSottile/age"
+    fi
+  fi
+  have gtimeout || have timeout || warn "no timeout(1) — install coreutils"
 }
 
 phase_verify() {
