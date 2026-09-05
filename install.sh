@@ -823,13 +823,17 @@ phase_shell() {
     append_block "$inter_file" "# >>> pluto (interactive) >>>" completion emit_interactive_block "$is_zsh"
   fi
   info "open a new shell to pick it up"
+}
 
-  # Optional, and the launcher degrades to a numbered menu without it, so this one is a no
-  # by default rather than something installed on your behalf.
-  if ! have fzf; then
-    info "fzf turns bare 'pluto' into a fuzzy picker; without it you get a numbered menu"
-    ensure_tool fzf fzf n || true
-  fi
+# Its own step: fzf has nothing to do with rc files, and declining those should not
+# silently decide this too.
+phase_extras() {
+  have fzf && return 0
+  step "PHASE 7b — optional extras"
+  info "fzf turns bare 'pluto' into a fuzzy picker; without it you get a numbered menu"
+  # A no by default: the launcher degrades gracefully, so this is a convenience rather
+  # than something to install on someone's behalf.
+  ensure_tool fzf fzf n || true
 }
 
 print_shell_block() { # IS_ZSH
@@ -969,6 +973,7 @@ phase_semantic
 phase_agent
 phase_global
 phase_shell
+phase_extras
 phase_cloud
 phase_verify
 report
