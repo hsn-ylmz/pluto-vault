@@ -97,6 +97,10 @@ Re-running is safe and is the supported way to upgrade. See
 
 Required:
 
+- an agent CLI, if you want `pluto` to actually open sessions. Claude Code by default
+  (`npm install -g @anthropic-ai/claude-code`). Everything that does not start a session
+  works without one, and `PLUTO_AGENT` points the launcher at any other command that
+  takes `[flags] [prompt]`.
 - `git`
 - `python3` (the hooks use it to escape JSON; the semantic tier needs it to load sqlite
   extensions, which the installer checks for explicitly)
@@ -391,6 +395,7 @@ Environment variables:
 | Variable | Meaning |
 |---|---|
 | `PLUTO_HOME` | vault location. Defaults to `~/pluto`. Every script falls back to that default, because hooks also run in shells that never read your rc files. |
+| `PLUTO_AGENT` | the CLI the launcher runs. Defaults to `claude`. The installer sets it for you when you pick a different agent. |
 | `PLUTO_OLLAMA_URL` | where Ollama lives. Defaults to `http://localhost:11434`. |
 | `PLUTO_BACKUP_DIR` | overrides the backup target chosen at install time. |
 | `PLUTO_DRY_RUN` | makes the launcher print its target instead of starting an agent. Used by the test suite. |
@@ -439,6 +444,18 @@ one.
 ---
 
 ## Troubleshooting
+
+**`exec: claude: not found`, or `pluto: 'claude' is not on your PATH`.** The launcher hands
+the directory and your question to an agent CLI, and that CLI is a separate program. Install
+Claude Code with `npm install -g @anthropic-ai/claude-code`, or point pluto at whatever you
+use:
+
+```bash
+export PLUTO_AGENT=your-agent-command
+```
+
+The registry half of pluto never needed it: `--list`, `--names`, `--path`, `--status`,
+`--create`, `--edit` and `--remove` all work with no agent installed.
 
 **`pluto: command not found` right after a successful install.** You are in a shell that
 never read the file the environment went into. `source ~/.profile` fixes the session; for a

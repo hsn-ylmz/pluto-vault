@@ -20,6 +20,10 @@ set -euo pipefail
 PLUTO="${PLUTO_HOME:-$HOME/pluto}"
 PLUTO_VERSION="1.0.0"
 
+# The agent CLI to hand the directory and the question to. Claude Code by default; set
+# PLUTO_AGENT to anything else that takes `AGENT [flags] [prompt]`.
+AGENT="${PLUTO_AGENT:-claude}"
+
 # registry() — emits name<TAB>path<TAB>status. Shared with .claude/scripts/refresh_active.sh
 # so the launcher and the status script can never disagree about what exists.
 . "$PLUTO/bin/_pluto_registry.sh"
@@ -152,29 +156,57 @@ ask_launch() { # PROMPT
   launch "$dir" "$1"
 }
 
-launch() { # DIR [claude args...]
+# `exec: claude: not found` is a true statement and a useless one. Check first, and say
+# what to do about it.
+require_agent() {
+  command -v "$AGENT" >/dev/null 2>&1 && return 0
+  {
+    echo "pluto: '$AGENT' is not on your PATH"
+    echo
+    echo "pluto opens a project by handing it to an agent CLI. Either install that CLI,"
+    echo "or point PLUTO_AGENT at the command you use:"
+    echo
+    echo "    export PLUTO_AGENT=your-agent-command"
+    echo
+    if [ "$AGENT" = claude ]; then
+      echo "Claude Code:  npm install -g @anthropic-ai/claude-code"
+      echo "              https://claude.com/claude-code"
+      echo
+    fi
+    echo "Everything that does not start a session still works: --list, --names, --path,"
+    echo "--status, --create, --edit, --remove."
+  } >&2
+  exit 127
+}
+
+launch() { # DIR [agent args...]
   local dir="$1"; shift
   [ -d "$dir" ] || die "missing directory: $dir"
   if [ -n "${PLUTO_DRY_RUN:-}" ]; then
     printf 'dir: %s\n' "$dir"
+    printf 'agent: %s\n' "$AGENT"
     if [ $# -gt 0 ]; then
       printf 'arg: %s\n' "$@"
     fi
     exit 0
   fi
-  cd "$dir" && exec claude "$@"
+  require_agent
+  cd "$dir" && exec "$AGENT" "$@"
 }
 
 # --------------------------------------------------------------------------- commands
 
 cmd_help() {
   cat <<EOF
-pluto — open a project with claude, ask it anything, and manage the registry.
+pluto — open a project with your agent, ask it anything, and manage the registry.
 
 USAGE
   pluto                        pick a project interactively
-  pluto NAME [claude args...]  open NAME, forwarding remaining args to claude
-  pluto TEXT...                ask claude TEXT, here or in the vault (see FREE TEXT)
+  pluto NAME [agent args...]   open NAME, forwarding remaining args to the agent
+  pluto TEXT...                ask TEXT, here or in the vault (see FREE TEXT)
+
+AGENT
+  \$PLUTO_AGENT, currently '$AGENT'. Any CLI taking [flags] [prompt] works.
 
 COMMANDS
   -l, --list                   list registered projects
@@ -221,7 +253,7 @@ FLAGS
 
   Flags after a project name are never pluto's:
 
-      pluto api-server --help   runs 'claude --help' inside api-server
+      pluto api-server --help   runs '$AGENT --help' inside api-server
 
 NEW PROJECTS
   pluto --create NAME [--path DIR] [--status TEXT] [--mkdir]

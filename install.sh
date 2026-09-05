@@ -26,6 +26,7 @@ WANT_SHELL="ask"
 ASSUME_YES=""
 DRY_RUN=""
 
+AGENT_CMD=""        # the CLI the launcher execs; empty means the default, claude
 VENV_PY=""          # filled in by the semantic phase; empty means no MCP
 VENV_BROKEN=""      # a .venv exists but cannot import what the tier needs
 BACKUP_DIR=""
@@ -439,6 +440,29 @@ choose_agent() {
     AGENT="$(menu "which agent do you use?" 1 claude-code cursor codex other none)"
   fi
   ok "agent: $AGENT"
+
+  # The launcher execs this. Getting it wrong is not fatal here, but discovering it at the
+  # first `pluto something` is a worse place to find out.
+  case "$AGENT" in
+    claude-code) AGENT_CMD=claude ;;
+    codex)       AGENT_CMD=codex ;;
+    cursor)      AGENT_CMD=cursor-agent ;;
+    none)        AGENT_CMD="" ;;
+    other)       AGENT_CMD="$(ask "command the launcher should run:" claude)" ;;
+  esac
+  [ -n "$AGENT_CMD" ] || return 0
+
+  if have "$AGENT_CMD"; then
+    ok "launcher will run: $AGENT_CMD ($(command -v "$AGENT_CMD"))"
+  else
+    warn "'$AGENT_CMD' is not on your PATH"
+    if [ "$AGENT_CMD" = claude ]; then
+      info "install Claude Code:  npm install -g @anthropic-ai/claude-code"
+      info "                      https://claude.com/claude-code"
+    fi
+    info "everything except starting a session still works: --list, --status, --create ..."
+    info "already have it under another name? export PLUTO_AGENT=<command>"
+  fi
 }
 
 phase_agent() {
@@ -580,6 +604,10 @@ emit_env_block() {
   printf '\n%s\n' "# >>> pluto >>>"
   printf 'export PLUTO_HOME="%s"\n' "$VAULT"
   printf 'case ":$PATH:" in *":%s/bin:"*) ;; *) export PATH="%s/bin:$PATH" ;; esac\n' "$VAULT" "$VAULT"
+  # Only when it differs from the default, so the common case leaves no noise behind.
+  if [ -n "$AGENT_CMD" ] && [ "$AGENT_CMD" != claude ]; then
+    printf 'export PLUTO_AGENT="%s"\n' "$AGENT_CMD"
+  fi
   printf '%s\n' "# <<< pluto <<<"
 }
 
@@ -747,6 +775,9 @@ report() {
   step "done"
   info "vault:     $(rel "$VAULT")"
   info "files:     $INSTALLED written"
+  if [ -n "$AGENT_CMD" ] && ! have "$AGENT_CMD"; then
+    warn "'$AGENT_CMD' is still not installed — pluto NAME and free text will not start"
+  fi
   [ -n "$SKIPPED_TIERS" ] && info "skipped:  $SKIPPED_TIERS"
   printf '\n'
   info "next:"
