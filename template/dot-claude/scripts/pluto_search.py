@@ -1,4 +1,4 @@
-#!{{PY}}
+#!/usr/bin/env python3
 import sqlite3, sqlite_vec, json, sys
 from pathlib import Path
 from pluto_index import embed, DB

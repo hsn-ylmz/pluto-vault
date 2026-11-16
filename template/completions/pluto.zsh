@@ -1,46 +1,27 @@
 #compdef pluto
 # zsh completion for pluto. Sourced from your rc file by the installer's shell block.
 #
-# Project names come from `pluto --names`, which reads projects/*.md on every call — so a
-# project created a second ago completes without regenerating anything. The cost is one
-# subshell per TAB: a directory listing and some awk.
+# pluto takes no project names: it is one entry point, and projects are handled inside the
+# conversation. Only its own flags are completed.
 #
 # The `noglob pluto` alias does not interfere: zsh maps noglob to its own _precommand
 # handler, which strips the modifier and completes the real command.
 
 _pluto() {
-  local -a commands projects
+  local -a commands
   commands=(
     '--list:list registered projects'
     '-l:list registered projects'
-    '--names:one project name per line'
-    '--path:print a project directory and exit'
-    '--create:register a new project'
-    '--edit:open a project entry in $EDITOR'
-    '--remove:delete a project entry'
     '--status:git / mtime state of every project'
-    '--ask:force the rest to be a question'
+    '-q:cheap model for this call'
+    '--quick:cheap model for this call'
+    '--deep:default model for this call'
     '--help:usage'
     '--version:version'
   )
-  # _describe takes the NAME of an array, not its values.
-  projects=(${(f)"$(pluto --names 2>/dev/null)"})
-
   if (( CURRENT == 2 )); then
     _describe -t commands 'pluto command' commands
-    _describe -t projects 'project' projects
-    return
   fi
-
-  # --path / --edit / --remove each take exactly one project name.
-  case "${words[2]}" in
-    --path|--edit|--remove)
-      (( CURRENT == 3 )) && _describe -t projects 'project' projects
-      return
-      ;;
-  esac
-
-  # After a project name the rest is free text or agent flags — nothing useful to offer.
   return 0
 }
 

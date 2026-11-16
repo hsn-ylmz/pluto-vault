@@ -1,5 +1,7 @@
 #!/bin/bash
-# Inject context.md + rules.md + a pointer to the last daily log.
+# Inject preferences.md + context.md + rules.md + a pointer to the last daily log.
+# preferences.md is injected here because the global pluto-global-start.sh skips the vault
+# (to avoid double injection), so without this line the vault never sees the standing preferences.
 set -u
 V="$CLAUDE_PROJECT_DIR"
 S="$V/.claude/hooks/.state"
@@ -8,6 +10,9 @@ date +%s > "$S/start"
 echo 0 > "$S/prompts"
 
 CTX=""
+[ -f "$V/preferences.md" ] && CTX="$CTX$(cat "$V/preferences.md")
+
+"
 [ -f "$V/context.md" ] && CTX="$CTX$(cat "$V/context.md")
 
 "

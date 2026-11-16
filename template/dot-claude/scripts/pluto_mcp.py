@@ -1,4 +1,4 @@
-#!{{PY}}
+#!/usr/bin/env python3
 from mcp.server.mcpserver import MCPServer
 from pathlib import Path
 from datetime import date

@@ -1,16 +1,91 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\"", "timeout": 10 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/ollama-lazy-load.sh\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/reindex.sh\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/scripts/session_brief.py\"",
+            "timeout": 10,
+            "statusMessage": "Açık işler toplanıyor..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/scripts/vesta.py\" brief",
+            "timeout": 10,
+            "statusMessage": "Tutarsızlıklar kontrol ediliyor..."
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/prompt-counter.sh\"", "timeout": 5 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/prompt-counter.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end.sh\"", "timeout": 10 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/ollama-cleanup.sh\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/scripts/vesta.py\" scan",
+            "timeout": 10
+          }
+        ]
+      }
     ],
     "PreCompact": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.sh\"", "timeout": 5 } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/episode-log.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
