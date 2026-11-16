@@ -14,10 +14,9 @@ It also ships a launcher, because the other half of the problem is getting to th
 directory with the right question already typed.
 
 ```
-pluto                                     pick a project, open it
-pluto api-server                          open that one
-pluto api-server why does the test fail   open it, seeded with the question
-pluto how can I clean my mac safely?      just ask, from wherever you are
+pluto                                     open the vault session
+pluto how can I clean my mac safely?      ask; Pluto routes it to the right project
+pluto why does the api-server test fail   the same, about another project
 pluto --status                            what moved since you last looked
 ```
 
@@ -204,59 +203,36 @@ session injection. The heavy tier is offered last, on purpose.
 ## Command reference
 
 ```
-pluto                          pick a project interactively (fzf, or a numbered menu)
-pluto NAME [agent args...]     open NAME, forwarding any remaining flags to the agent
-pluto TEXT...                  ask; see Free text
+pluto                          open the vault session
+pluto TEXT...                  ask Pluto anything; see Questions
+pluto -q TEXT...               the same, on the cheap model for this call
 
--l, --list                     list projects with their status line
-    --names                    one bare project name per line, for scripts and completion
-    --path NAME                print NAME's directory and exit
-    --create NAME [...]        register a project; see below
-    --edit NAME                open NAME's registry entry in $EDITOR
-    --remove NAME              delete NAME's registry entry, after confirming
+-l, --list                     list registered projects with their status line
     --status                   git and mtime state of every registered project
-    --ask TEXT...              force TEXT to be a question, never a project name
+-q, --quick                    cheap model for this call (see Model tier)
+    --deep                     default model for this call
 -h, --help                     full usage
     --version
 ```
 
-Reserved commands are only reserved in first position. Any other leading flag opens the
-picker and is forwarded, so `pluto --continue` picks a project and resumes its last
-session. Flags after a project name are never pluto's.
+Only pluto's own commands are reserved, and only in first position. Any other leading flag
+is forwarded to the agent, so `pluto --continue` resumes the last vault session.
 
-There is no `pluto cd`, because a child process cannot change your shell's directory.
-Compose instead:
-
-```bash
-cd "$(pluto --path api-server)"
-```
+Projects are not command arguments. `pluto "is the api-server test failing?"` is a
+question about api-server, not a shortcut into it. Projects are created and changed inside the conversation (see Projects).
 
 ---
 
-## Free text
+## Questions
 
-Anything that is neither a reserved command nor a registered project is treated as a
-question. Pluto starts an interactive agent session seeded with it.
+Anything that is not a flag is one question for Pluto. Pluto starts a session in the vault,
+and every registered project is reachable from it. Pluto decides from the conversation which
+project a task belongs to, so one question can span projects.
 
-Where it runs: the registered project your current directory is inside, or the vault if
-you are outside all of them. When projects are nested, the longest matching path wins.
-It always prints which directory it chose.
-
-Two shapes deliberately stay project lookups and fail with `unknown project`:
-
-```
-pluto backup                 a single bare, name-shaped word
-pluto api-sevrer --continue  an unknown word carrying agent flags
-```
-
-Both are far likelier to be a typo than a question, and silently turning a typo into a
-prompt buries the message telling you the name is wrong. Use `--ask` to force either
-through. `--ask` is also the only way to drive free text without a terminal.
-
-One shell detail that is not cosmetic: zsh expands `?` and `*` before pluto is ever
-reached, so an unquoted question dies in the shell with `no matches found`. The installer
-adds `alias pluto='noglob pluto'` for zsh users, which fixes `?`, `*` and `[`. Apostrophes
-and `& | ; ( ) < >` still need quoting:
+One shell detail that is not cosmetic: zsh expands `?` and `*` before pluto is ever reached,
+so an unquoted question dies in the shell with `no matches found`. The installer adds
+`alias pluto='noglob pluto'` for zsh users, which fixes `?`, `*` and `[`. Apostrophes and
+`& | ; ( ) < >` still need quoting:
 
 ```bash
 pluto "what's eating my disk?"
@@ -268,50 +244,44 @@ Bash needs no alias; it leaves unmatched globs alone.
 
 ## Model tier
 
-Vault work is daily stuff: a log entry, a capture, a question you want answered rather
-than researched. It does not need the expensive model. A registered project is real work
-and gets your default.
-
-```
-pluto how do I clear the DNS cache      vault   -> cheap model
-pluto api-server audit the parser       project -> your default
-pluto -q api-server what does WP2 mean  forced cheap
-pluto --deep how should I structure     forced default, in the vault
-```
-
-Nothing classifies the question. It is a directory test, so the launch path stays free of
-network calls and latency, and you can always predict what you will get.
+Every session starts in the vault on your default model. The cheap model is opt-in, for one
+call with `-q`, or for every session with `PLUTO_TIER=quick`. Nothing classifies the
+question, so the launch path stays free of network calls and latency.
 
 | Variable | Effect |
 |---|---|
-| `PLUTO_QUICK_MODEL` | model for vault work. Defaults to `haiku`. Set it empty to turn tiering off entirely. |
-| `PLUTO_DEEP_MODEL` | model for project work. Unset, meaning whatever your agent already uses. |
+| `PLUTO_TIER` | `deep` (default) or `quick` for every session |
+| `PLUTO_QUICK_MODEL` | the cheap model. Defaults to `haiku`. Set it empty to turn tiering off. |
+| `PLUTO_DEEP_MODEL` | the default model. Unset, meaning whatever your agent already uses. |
 
 `--model` is Claude Code's flag, so this only applies when your agent is Claude Code. Any
 other `PLUTO_AGENT` gets its arguments untouched.
 
-## Adding projects and completion
+## Projects
 
-```bash
-pluto --create api-server --path ~/code/api-server --status "serves the API"
-pluto --create                                      # or answer three prompts
-```
-
-Flags make it scriptable; with `--path` given it needs no terminal at all. Creating a
-missing directory is never silent, so you are either asked or you passed `--mkdir`.
-
-A new project is a usable CLI argument immediately. `pluto api-server` resolves it, and
-TAB completion offers it on the next keystroke. Nothing is cached and nothing is
-regenerated, because the completions call `pluto --names`, which reads `projects/*.md` on
-every invocation.
-
-**The registry is your notes.** `pluto api-server` resolves through `path:` in the
-frontmatter of `projects/api-server.md`, a file you were going to write anyway:
+A new project is started by asking, inside the conversation. Pluto asks for the name, the
+directory and a one-line status, in one question, if you have not given them. A directory
+outside the vault is created only after you say yes. Pluto then writes
+`projects/<name>.md`, a file you were going to write anyway:
 
 ```markdown
 ---
 name: api-server
 path: ~/code/api-server
+---
+
+## Status
+serves the API. Blocked on the auth migration.
+```
+
+The first non-empty line under `## Status` becomes the description in `pluto --list`.
+Everything else is free prose. There is no separate config file listing your projects, so
+the list cannot disagree with your notes. A new project is reachable from the next session,
+because the session's directory list is read when it starts.
+
+Completion for zsh and bash offers pluto's own flags and is wired into your rc file by the
+installer. On a shell that has never run `compinit`, the installer bootstraps it.
+
 ---
 
 ## Status
@@ -617,8 +587,8 @@ use:
 export PLUTO_AGENT=your-agent-command
 ```
 
-The registry half of pluto never needed it: `--list`, `--names`, `--path`, `--status`,
-`--create`, `--edit` and `--remove` all work with no agent installed.
+The registry half of pluto never needed it: `--list`, `--status` and `--version` all work
+with no agent installed.
 
 **`pluto: command not found` right after a successful install.** You are in a shell that
 never read the file the environment went into. `source ~/.profile` fixes the session; for a
@@ -632,10 +602,6 @@ interactive rc by the installer; open a new shell, or add
 **TAB completion does nothing.** Completion needs `compinit` to have run before
 `completions/pluto.zsh` is sourced. The installer's block handles both cases; if you added
 the lines by hand, check the order. `echo $_comps[pluto]` should print `_pluto`.
-
-**`unknown project` for something you meant as a question.** A single bare word, or an
-unknown word followed by flags, is read as a project name on purpose. Use
-`pluto --ask ...`.
 
 **`ollama embedding failed`.** The URL in the message is where it looked. Start Ollama, or
 set `PLUTO_OLLAMA_URL`.

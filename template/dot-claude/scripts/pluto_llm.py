@@ -34,7 +34,7 @@ def model_available(model: str) -> bool:
     except Exception:
         return False
 
-# Must match pluto_mail and pluto_jobs: ollama keys the resident model on num_ctx, and a
+# Keep this value stable: ollama keys the resident model on num_ctx, and a
 # different value evicts and reloads the weights.
 LOCAL_CTX = 8192
 ANSWER_ROOM = 1200          # tokens left for the reply, and for any reasoning the model does first

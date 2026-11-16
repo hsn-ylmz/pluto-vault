@@ -458,6 +458,12 @@ phase_content() {
   put_content rules.md        rules.md
   put_content preferences.md  preferences.md
   put_content projects/pluto.md   projects/pluto.md
+  # Personas are knowledge you fill in, so they are created once and then yours.
+  local p
+  put_content personas/README.md personas/README.md
+  for p in vulcanus venus minerva mercurius aeneas janus vesta; do
+    put_content "personas/$p.md" "personas/$p.md"
+  done
 }
 
 phase_code() {
@@ -467,17 +473,27 @@ phase_code() {
   put_code dot-claude/settings.json         .claude/settings.json            644
   put_code dot-claude/commands/log.md       .claude/commands/log.md          644
   put_code dot-claude/commands/pref.md      .claude/commands/pref.md         644
-  local h
-  for h in session-start prompt-counter session-end pre-compact; do
+  local h s sk
+  # Every hook and script that dot-claude/settings.json names must be installed, or the
+  # first session after install fails on a missing file.
+  for h in session-start prompt-counter session-end pre-compact reindex episode-log \
+           ollama-cleanup ollama-lazy-load; do
     put_code "dot-claude/hooks/$h.sh"       ".claude/hooks/$h.sh"            755
   done
-  put_code dot-claude/scripts/refresh_active.sh .claude/scripts/refresh_active.sh 755
-  put_code dot-claude/scripts/pluto_index.py    .claude/scripts/pluto_index.py    755
-  put_code dot-claude/scripts/pluto_search.py   .claude/scripts/pluto_search.py   755
-  put_code dot-claude/scripts/pluto_mcp.py      .claude/scripts/pluto_mcp.py      755
+  for s in refresh_active.sh; do
+    put_code "dot-claude/scripts/$s"        ".claude/scripts/$s"              755
+  done
+  for s in pluto_index pluto_search pluto_mcp pluto_registry pluto_llm pluto_log \
+           session_brief vesta; do
+    put_code "dot-claude/scripts/$s.py"     ".claude/scripts/$s.py"           755
+  done
+  # Persona skills point at personas/<name>.md; they are code, so they are kept up to date.
+  for sk in vulcanus venus minerva mercurius aeneas janus vesta; do
+    put_code "dot-claude/skills/$sk/SKILL.md" ".claude/skills/$sk/SKILL.md"    644
+  done
   put_code completions/pluto.zsh                completions/pluto.zsh            644
   put_code completions/pluto.bash               completions/pluto.bash           644
-  ok "launcher, 4 hooks, 3 scripts, /log, /pref, completions"
+  ok "launcher, 8 hooks, 9 scripts, 7 persona skills, /log, /pref, completions"
 }
 
 phase_semantic() {
@@ -683,7 +699,7 @@ choose_agent() {
     return 0
   fi
   [ "$AGENT_CMD" = claude ] && info "install it later: https://claude.com/claude-code"
-  info "everything except starting a session still works: --list, --status, --create ..."
+  info "everything except starting a session still works: --list, --status, --version"
   info "already have it under another name? export PLUTO_AGENT=<command>"
 }
 
@@ -896,7 +912,7 @@ emit_env_block() {
 emit_interactive_block() { # IS_ZSH
   printf '\n%s\n' "# >>> pluto (interactive) >>>"
   if [ -n "$1" ]; then
-    printf '# Free text goes straight to your agent: `pluto how do I clean my mac safely?`\n'
+    printf '# Questions go to Pluto: `pluto how do I clean my mac safely?`\n'
     printf '# noglob stops zsh expanding the ? and * before pluto ever sees them.\n'
     printf "alias pluto='noglob pluto'\n"
     printf '(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u }\n'
@@ -953,17 +969,6 @@ phase_shell() {
     append_block "$inter_file" "# >>> pluto (interactive) >>>" completion emit_interactive_block "$is_zsh"
   fi
   info "open a new shell to pick it up"
-}
-
-# Its own step: fzf has nothing to do with rc files, and declining those should not
-# silently decide this too.
-phase_extras() {
-  have fzf && return 0
-  step "PHASE 7b — optional extras"
-  info "fzf turns bare 'pluto' into a fuzzy picker; without it you get a numbered menu"
-  # A no by default: the launcher degrades gracefully, so this is a convenience rather
-  # than something to install on someone's behalf.
-  ensure_tool fzf fzf n || true
 }
 
 print_shell_block() { # IS_ZSH
@@ -1077,9 +1082,9 @@ phase_verify() {
   check "git repo"             git -C "$VAULT" rev-parse --git-dir
   check "has a commit"         git -C "$VAULT" rev-parse HEAD
   check "registry reads"       bash -c 'PLUTO="$1"; . "$1/bin/_pluto_registry.sh"; registry | grep -q .' _ "$VAULT"
-  check "resolves a project"   bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --path pluto' _ "$VAULT"
+  check "lists the vault"      bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --list | grep -q .' _ "$VAULT"
   check "free text dispatches" bash -c 'cd /; PLUTO_DRY_RUN=1 PLUTO_HOME="$1" "$1/bin/pluto" what should I work on' _ "$VAULT"
-  check "--names for completion" bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --names | grep -q .' _ "$VAULT"
+  check "version prints"        bash -c 'PLUTO_HOME="$1" "$1/bin/pluto" --version | grep -q pluto' _ "$VAULT"
   check "bash completion parses"  bash -n "$VAULT/completions/pluto.bash"
   case " $SKIPPED_TIERS " in
     *" semantic "*) VENV_PY="" ;;   # not installed, so nothing to check
@@ -1110,8 +1115,8 @@ report() {
   info "next:"
   dim "  1. open a new shell (the PATH and alias are only in new shells)"
   dim "  2. fill in the ## Active block of context.md — nothing works well until it is real"
-  dim "  3. add your projects: pluto --create"
-  dim "  4. pluto            # pick a project"
+  dim "  3. start a project by asking pluto inside the conversation"
+  dim "  4. pluto            # open the vault session"
   dim "     pluto --status   # what moved lately"
   printf '\n'
   dim "  to undo all of this later:  $(rel "$SRC")/uninstall.sh"
@@ -1131,7 +1136,6 @@ phase_semantic
 phase_agent
 phase_global
 phase_shell
-phase_extras
 phase_cloud
 phase_commit
 phase_verify

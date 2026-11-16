@@ -15,6 +15,20 @@ assistant. Direct, no filler, no warm-up paragraphs.
 | Project work | `projects/<name>.md` |
 | Durable knowledge | `notes/<slug>.md` |
 | Session log | `daily/` (append only, via `/log`) |
+| Specialist work | `personas/<name>.md`, routed by Pluto (see `personas/README.md`) |
+
+## One entry point
+`pluto` opens one session in the vault, and every registered project is reachable from it
+through `--add-dir`. A question can span projects: `pluto "what did the last review say"`.
+A project is not a command argument. Before writing into a project, read its `CLAUDE.md`:
+its working agreement still binds.
+
+## New project, inside the conversation
+When the user wants to start a project: ask for the name, the directory and a one-line
+status, in one question, if they have not given them. A directory outside the vault is
+created only after a yes. Then write `projects/<name>.md` with `name:` and `path:`
+front-matter and a `## Status` line that begins with `active`. The project is reachable from
+the next session, because the session's directory list is read at launch.
 
 ## Memory protocol
 - `daily/` is append-only. Never rewrite a past day.

@@ -19,11 +19,9 @@ MODEL = "nomic-embed-text-v2-moe"
 CHUNK, OVERLAP = 1000, 150   # model caps at 512 tokens; 1000 chars leaves headroom
 SKIP = {".git", ".claude", ".pluto", ".obsidian", "archive", ".venv"}
 
-# Regenerated from mail.db every day and heavily duplicated from one day to the next.
-# They were 52 of 144 chunks, 93% of the jobs ones being tracking URLs, and they crowded
-# real answers out of the top results: a search for a decision recorded in daily/ came
-# back with two chunks of base64 above it. Query them through the DB or --report.
-DERIVED = {"daily/jobs", "daily/mail", "daily/health"}
+# Generated daily sub-directories, if a deployment creates any, repeat from one day to the next
+# and are kept out of the index. Add their names here.
+DERIVED = set()
 
 # Prose from every registered project, so "have we done this before" can be answered from
 # outside the vault: a project's docs/ and .claude/rules/ are the

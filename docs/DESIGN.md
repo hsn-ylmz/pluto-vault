@@ -16,7 +16,7 @@ tokens in the background, and every word in `daily/` was written by something th
 
 ## The registry is your notes, not a config file
 
-`pluto api-server` resolves through `path:` in the frontmatter of `projects/api-server.md`.
+The session briefing and the vault session's directory list both read `path:` in the frontmatter of `projects/api-server.md`.
 
 The alternative — `~/.config/pluto/projects.toml` — is a second list of the same things. Two
 lists drift: you rename a directory, fix the config, and the note still says the old path;
@@ -44,28 +44,20 @@ Anything that writes outside the vault — `~/.claude`, the shell rc, the global
 registration — is behind `--no-global` or `--no-shell`, so the installer can be tested
 against a scratch vault without reaching into a real environment.
 
-## Free text goes straight to the agent
+## One entry point, and the conversation decides the project
 
-`pluto how can I clean my mac safely?` starts a session seeded with that question. It is the
-same launcher, so it lands in the right directory: the registered project your cwd is inside
-(longest match wins, so a nested project beats its parent), or the vault when you are outside
-one. It always prints which.
+`pluto how can I clean my mac safely?` is a question to Pluto. The launcher starts one session
+in the vault, and every registered project is reachable from it, through the directory list
+read at start. The launcher does not pick a project from the working directory: that routing
+was the first design, and it sent questions to the wrong place whenever the cwd was misleading.
 
-Two shapes deliberately stay project lookups and fail with `unknown project`:
-
-```
-pluto backup                 one bare, name-shaped word
-pluto api-sevrer --continue   unknown word carrying agent flags
-```
-
-Both are far likelier to be a typo than a question, and silently turning a typo into a prompt
-buries the message that tells you the name is wrong — which is the whole reason the registry
-exists. `pluto --ask ...` forces either through.
+Project names are not arguments either. `pluto "is the api-server test failing?"` is a
+question about api-server, which is what a user typing it means. Keeping the launcher to one question shape is what makes the
+rest predictable: a flag is a flag, anything else is a question.
 
 One shell detail that is not cosmetic: zsh expands `?` and `*` before the launcher is ever
 reached, so an unquoted question dies with `no matches found: safely?`. The installer adds
-`alias pluto='noglob pluto'` for zsh users. Bash needs nothing — it leaves unmatched globs
-alone.
+`alias pluto='noglob pluto'` for zsh users, and the README covers the quoting that remains.
 
 ## Everything heavy is optional, and asked for last
 

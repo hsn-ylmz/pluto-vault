@@ -5,7 +5,7 @@ Pull only helps when you already suspect something exists. This is the push side
 
 The registry is `projects/*.md` front-matter, which is the only place the paths are right;
 the hook this replaces hardcoded them and pointed at a directory that has not existed for some time. Their prose goes stale too -- an old note still calls a closed item the largest open one -- so only name, path and the active/dead word are
-read from there. Every status line comes from a live source: TRACKER.md, git, mail.db.
+read from there. Every status line comes from a live source: TRACKER.md and git.
 
 Deterministic on purpose. File reads, git and local SQL, no model call and no network,
 because this runs before every single session and must not be something worth skipping.
@@ -101,10 +101,6 @@ def deadline_note(proj):
     return f"{left} gün kaldı ({when})"
 
 
-def latest(dirpath, pattern="*.md"):
-    files = sorted(Path(dirpath).glob(pattern)) if Path(dirpath).is_dir() else []
-    return files[-1] if files else None
-
 
 def still_open():
     """The newest daily that carries the section, which is not always the newest daily:
@@ -121,33 +117,6 @@ def still_open():
     return []
 
 
-def mailbox_counts():
-    db = VAULT / ".pluto" / "mail.db"
-    if not db.is_file():
-        return ""
-    try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        mail = con.execute(
-            "SELECT COUNT(*) FROM msgs WHERE importance >= 3 AND trashed IS NULL "
-            "AND sent >= date('now','-2 day')").fetchone()[0]
-        jobs = con.execute(
-            "SELECT COUNT(*) FROM jobs WHERE fit >= 4 "
-            "AND first_seen >= date('now','-7 day')").fetchone()[0]
-        con.close()
-    except Exception:
-        return ""
-    return f"mail: {mail} öğe ≥3 önem (2g) · jobs: {jobs} yeni ilan fit≥4 (7g)"
-
-
-def health_note():
-    f = latest(VAULT / "daily" / "health")
-    if not f:
-        return ""
-    m = re.search(r"\*(\d+) finding", f.read_text(errors="ignore"))
-    if not m:
-        return ""
-    n = int(m.group(1))
-    return f"sağlık ({f.stem}): {n} bulgu" if n else ""
 
 
 def build():
@@ -178,9 +147,6 @@ def build():
         for it in items:
             lines.append(f"  - {it}")
 
-    counts = mailbox_counts()
-    if counts:
-        lines.append(counts)
 
     opens = still_open()
     if opens:
@@ -188,9 +154,6 @@ def build():
         for _, it in opens[:4]:
             lines.append(f"  - {it[:90]}")
 
-    h = health_note()
-    if h:
-        lines.append(h)
 
     return "\n".join(lines)
 
